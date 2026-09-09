@@ -1,0 +1,41 @@
+{
+  "raw_event": {
+    "address": "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e",
+    "topics": [
+      "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607",
+      "0x000000000000000000000000d9435e01354ffb1012e73c94145ab786c1ef9bea",
+      "0x000000000000000000000000a832f350e17b62041e4752f7a47cfe53efef1f0e",
+      "0x000000000000000000000000640f66bcdb9c843559740e6e839c4e47d379a656"
+    ],
+    "data": "0x000000000000000000000000d0601ce157db5bdc3162bbac2a2c8af5320d9eec00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000024150e39800400000",
+    "blockNumber": "0x3741a2a",
+    "transactionHash": "0xbc810f79d5a7a105f8c4b9ccd012a174210dd3dafa7064d227263f037cee6e9b",
+    "transactionIndex": "0xa",
+    "blockHash": "0x97820ed2d39e43dd046812cdb651dde8fdd3f6756b5de7fa4980bc0dad21ebb1",
+    "blockTimestamp": "0x0",
+    "logIndex": "0x3b",
+    "removed": false
+  },
+  "decoded": {
+    "tx_hash": "0xbc810f79d5a7a105f8c4b9ccd012a174210dd3dafa7064d227263f037cee6e9b",
+    "log_index": 59,
+    "block_number": 57940522,
+    "block_timestamp": "2026-09-08T19:28:58+00:00",
+    "factory_address": "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e",
+    "token_address": "0xd9435e01354Ffb1012e73c94145aB786C1eF9beA",
+    "curve_address": "0xA832f350E17B62041E4752f7a47Cfe53EFEF1f0E",
+    "creator_address": "0x640F66BCDB9C843559740e6E839C4e47D379A656",
+    "quote_asset_address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+    "pair_or_pool_address": null,
+    "launch_type": "pons-v2",
+    "raw_event_name": "TokenLaunched",
+    "launch_config_id": "0",
+    "graduation_threshold": "41600000000000000000",
+    "detected_at": "2026-09-08T19:30:41+00:00",
+    "token_symbol": "CATWIFI",
+    "token_name": "CATWIFI",
+    "quote_asset_symbol": "NVDA",
+    "quote_asset_name": "NVIDIA \u2022 Robinhood Token",
+    "is_stock_quote": 1
+  }
+}

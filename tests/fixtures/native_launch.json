@@ -1,0 +1,41 @@
+{
+  "raw_event": {
+    "address": "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e",
+    "topics": [
+      "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607",
+      "0x0000000000000000000000004fd408ba87abd0d6b1fc8d3e1302dfd4dca0a619",
+      "0x0000000000000000000000009bc68f474ae7a8e1786a6d09f35d325195a0b6f2",
+      "0x00000000000000000000000039e8cacace8366c69af07f45be74a3036581b309"
+    ],
+    "data": "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003a4965bf58a40000",
+    "blockNumber": "0x3741a2b",
+    "transactionHash": "0x8304f6ef9e0778867f151b7e230863a179174cc87416e803f2ddd86384a4a214",
+    "transactionIndex": "0xb",
+    "blockHash": "0x5d12fa6ab50aca36b1d01f2817ac518156527810824993ba9c5fcdc14055f603",
+    "blockTimestamp": "0x0",
+    "logIndex": "0x2a",
+    "removed": false
+  },
+  "decoded": {
+    "tx_hash": "0x8304f6ef9e0778867f151b7e230863a179174cc87416e803f2ddd86384a4a214",
+    "log_index": 42,
+    "block_number": 57940523,
+    "block_timestamp": "2026-09-08T19:28:58+00:00",
+    "factory_address": "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e",
+    "token_address": "0x4fd408bA87ABd0d6B1fC8d3e1302dfD4DcA0a619",
+    "curve_address": "0x9bC68f474AE7A8E1786a6D09f35D325195a0B6F2",
+    "creator_address": "0x39e8CACACE8366c69Af07f45BE74A3036581b309",
+    "quote_asset_address": "0x0000000000000000000000000000000000000000",
+    "pair_or_pool_address": null,
+    "launch_type": "pons-v2",
+    "raw_event_name": "TokenLaunched",
+    "launch_config_id": "0",
+    "graduation_threshold": "4200000000000000000",
+    "detected_at": "2026-09-08T19:30:43+00:00",
+    "token_symbol": "MAWT",
+    "token_name": "Mawt",
+    "quote_asset_symbol": "ETH",
+    "quote_asset_name": "Ether",
+    "is_stock_quote": 0
+  }
+}

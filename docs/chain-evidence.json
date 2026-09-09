@@ -1,0 +1,25 @@
+{
+  "observed_at_utc": "2026-09-08T19:30:41+00:00",
+  "chain_id": 4663,
+  "source_rpc": "https://rpc.mainnet.chain.robinhood.com",
+  "factory": "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e",
+  "factory_runtime_bytes": 24177,
+  "factory_runtime_keccak": "0x89a27da6f703e0a7cdd4f233e7cb57604ff75b164530962d3ff7cf8483a67d84",
+  "source_commit": "33c2281bfcf91f18ddc3e8497894ae764118ce37",
+  "topic0": "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607",
+  "searched_ranges": [
+    [
+      57940521,
+      57941520
+    ]
+  ],
+  "decoded_launches": 54,
+  "stock_paired_launches": 25,
+  "verified_stock_registry_entries": 194,
+  "registry_source": "https://api.robinhood.com/rhj/assets",
+  "examples": [
+    "../tests/fixtures/stock_launch.json",
+    "../tests/fixtures/native_launch.json"
+  ],
+  "explorer_api_status": "Cloudflare HTTP 403; no independent explorer source/bytecode compilation match claimed"
+}

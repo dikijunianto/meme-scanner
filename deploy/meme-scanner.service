@@ -1,0 +1,28 @@
+[Unit]
+Description=Read-only Robinhood Chain Pons V2 scanner
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/meme-scanner
+Environment=SCANNER_ENV=/opt/meme-scanner/config/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/meme-scanner/.venv/bin/python -m app.main
+Restart=on-failure
+RestartPreventExitStatus=2 3
+RestartSec=10
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/meme-scanner/data /opt/meme-scanner/logs
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target
