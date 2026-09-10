@@ -2,8 +2,8 @@
 
 Evidence snapshot: **2026-09-10 09:06:33 UTC** (2026-09-10 16:06 WIB).
 Production: `/opt/meme-scanner`, Ubuntu, existing Python 3.12 venv and SQLite WAL.
-Release commit message: `Phase 1.5: add free-tier live-first mode`; full pushed hash
-is supplied in the delivery message and recorded in `data/phase15-release.txt` on the VPS.
+Release commit message: `feat: add free-tier live-first mode`; the full pushed hash is
+supplied in the delivery message.
 
 ## LIVE VERIFIED
 
