@@ -126,11 +126,13 @@ class Pons:
             if keccak(code).hex() != RUNTIME_HASHES[address]:
                 raise ValueError("Pons factory bytecode changed; re-verify deployment before continuing")
 
-    async def logs(self, first, last):
+    async def logs(self, first, last, source="manual_backfill"):
         result = []
         while first <= last:
             end = min(last, first + self.log_span - 1)
             try:
+                if self.telemetry:
+                    self.telemetry.add(source + "_getlogs")
                 part = await self.rpc.call("eth_getLogs", [{
                     "address": list(self.config.factories),
                     "topics": [EVENT_TOPICS if self.include_graduations else TOPIC],
@@ -166,14 +168,25 @@ class Pons:
                 existing["is_stock_quote"] = int(self.db.is_stock(existing["quote_asset_address"]))
                 launches.append(existing)
                 continue
+            quote = self.db.stock_asset(launch["quote_asset_address"])
             if self.telemetry:
-                self.telemetry.add("metadata_calls", 2 + (2 if launch["quote_asset_address"] != ZERO else 0))
-            token, quote = await asyncio.gather(
-                metadata(self.rpc, launch["token_address"], block.number),
-                metadata(self.rpc, launch["quote_asset_address"], block.number))
-            launch.update(token_symbol=token["symbol"], token_name=token["name"],
-                          quote_asset_symbol=quote["symbol"], quote_asset_name=quote["name"],
-                          is_stock_quote=int(self.db.is_stock(launch["quote_asset_address"])))
+                self.telemetry.add("quote_registry_hits" if quote else "quote_registry_misses")
+            if not quote:
+                # A non-stock launch remains a durable event, without four immutable
+                # metadata calls that provide no Phase 1.6 trading-research signal.
+                launch.update(token_symbol=None, token_name=None, quote_asset_symbol=None,
+                              quote_asset_name=None, is_stock_quote=0)
+                if self.telemetry:
+                    self.telemetry.add("skipped_nonstock_metadata_calls", 2 if launch["quote_asset_address"] == ZERO else 4)
+                    self.telemetry.add("metadata_calls_nonstock")
+            else:
+                if self.telemetry:
+                    self.telemetry.add("metadata_calls", 2)
+                    self.telemetry.add("metadata_calls_stock", 2)
+                token = await metadata(self.rpc, launch["token_address"], block.number)
+                launch.update(token_symbol=token["symbol"], token_name=token["name"],
+                              quote_asset_symbol=quote["symbol"], quote_asset_name=quote["name"],
+                              is_stock_quote=1)
             launches.append(launch)
             log.info("Launch block=%d token=%s quote=%s stock=%s tx=%s",
                      block.number, launch["token_address"], launch["quote_asset_address"],

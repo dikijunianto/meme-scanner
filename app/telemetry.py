@@ -5,6 +5,12 @@ METHODS = {"eth_chainId", "eth_blockNumber", "eth_getBlockByNumber", "eth_getLog
 METRICS = {"http_total", "http_429", "rpc_rate_limits", "retries", "failed_requests",
            "ws_reconnects", "ws_log_notifications", "ws_bytes", "launches_received",
            "stock_paired_launches", "metadata_calls", "blocks_recovered"} | {"method:" + m for m in METHODS}
+METRICS |= {"ws_events_processed", "ws_launch_events", "ws_graduation_events",
+            "startup_recovery_getlogs", "reconnect_recovery_getlogs", "manual_backfill_getlogs",
+            "diagnostic_getlogs", "metadata_calls_stock", "metadata_calls_nonstock",
+            "block_header_cache_hits", "block_header_cache_misses", "quote_registry_hits",
+            "quote_registry_misses", "skipped_nonstock_metadata_calls",
+            "intentional_gap_count", "intentional_gap_blocks"}
 
 
 class Telemetry:

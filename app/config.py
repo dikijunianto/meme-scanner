@@ -37,6 +37,9 @@ class Config:
     mode: str = "live"
     live_overlap: int = 5
     recovery_max: int = 10000
+    transport_mode: str = "http_complete"
+    startup_recovery_max: int = 500
+    head_healthcheck: float = 60
 
     @classmethod
     def load(cls):
@@ -95,7 +98,10 @@ class Config:
                      env.get("ROBINHOOD_WS_SUBSCRIPTION") or "logs",
                      os.environ.get("SCANNER_MODE") or env.get("SCANNER_MODE") or "live",
                      number("LIVE_START_OVERLAP_BLOCKS", 5, True, 1),
-                     number("LIVE_RECOVERY_MAX_BLOCKS", 10000, True, 1))
+                     number("LIVE_MAX_RECOVERY_BLOCKS", env.get("LIVE_RECOVERY_MAX_BLOCKS") or 1000, True, 1),
+                     env.get("LIVE_TRANSPORT_MODE") or "ws_first",
+                     number("LIVE_MAX_STARTUP_RECOVERY_BLOCKS", 500, True, 1),
+                     number("HEAD_HEALTHCHECK_SECONDS", 60, minimum=60))
         if result.batch > 500 or result.retention <= max(result.reorg_depth, result.overlap):
             raise ValueError("Batch must be <=500; retention must exceed overlap and reorg depth")
         if result.start_block is not None and result.start_block < 0:
@@ -112,6 +118,8 @@ class Config:
             raise ValueError("Live mode requires filtered logs subscriptions")
         if not result.confirmations <= result.live_overlap <= min(100, result.reorg_depth):
             raise ValueError("Live overlap must cover confirmations and be <=100 and reorg depth")
-        if result.recovery_max < result.live_overlap or result.rpc_rps > 5:
+        if result.transport_mode not in ("ws_first", "http_complete"):
+            raise ValueError("LIVE_TRANSPORT_MODE must be ws_first or http_complete")
+        if result.recovery_max < result.live_overlap or result.startup_recovery_max < result.live_overlap or result.rpc_rps > 5:
             raise ValueError("Recovery bound must cover overlap; free-tier HTTP rate must be <=5")
         return result

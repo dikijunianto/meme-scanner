@@ -5,7 +5,7 @@ import logging
 import sqlite3
 import time
 
-from app.models import quantity
+from app.models import Block, quantity, utc_now
 from app.pons import Pons
 from app.rpc import RetriesExhausted, RpcError, retry_delay
 from app.stock_assets import sync_assets
@@ -99,9 +99,10 @@ class Watcher:
         last = min(target, first + self.config.batch - 1)
         return await self.process_range(first, last, head)
 
-    async def process_range(self, first, last, head):
+    async def process_range(self, first, last, head, source="manual_backfill"):
         anchor = await self.rpc.block(last)
-        events = await self.pons.logs(first, last)
+        events = (await self.pons.logs(first, last) if source == "manual_backfill"
+                  else await self.pons.logs(first, last, source))
         grouped = defaultdict(list)
         for event in events:
             number = quantity(event["blockNumber"])
@@ -161,7 +162,115 @@ class Watcher:
         log.info("Processed blocks=%d..%d latest=%d events=%d", first, last, head, len(events))
         return last - first + 1
 
+    async def process_ws_event(self, event):
+        number = quantity(event["blockNumber"])
+        # The subscription carries the immutable event block hash. Contract calls
+        # are pinned to its number; headers remain reserved for bounded recovery.
+        block = Block(number, event["blockHash"].lower(), "0x" + "00" * 32, utc_now(), 0)
+        launches = await self.pons.launches([event], block)
+        graduations = await self.pons.graduations([event], block)
+        previous = self.db.last("live_checkpoint")
+        segment = self.db.state("live_segment_start")
+        coverage_first = int(segment) if segment else block.number
+        if previous is not None and block.number <= previous:
+            coverage_first = block.number
+        new_launches, stock = self.db.save_range([None], [launches], [graduations], block.number,
+                                                 block.number, "live_checkpoint", self.config.retention,
+                                                 coverage_first=coverage_first)
+        with self.db.conn:
+            self.db.set_state("live_segment_start", block.number + 1)
+            self.db.set_state("live_degraded", 0)
+        if self.telemetry:
+            self.telemetry.add("launches_received", new_launches)
+            self.telemetry.add("stock_paired_launches", stock)
+        log.info("WebSocket event block=%d launches=%d graduations=%d", block.number,
+                 len(launches), len(graduations))
+
+    def record_gap(self, kind, first, last):
+        if first > last:
+            return
+        self.db.record_gap(kind, first, last)
+        with self.db.conn:
+            self.db.set_state("live_degraded", 1)
+            self.db.set_state("live_segment_start", "")
+        if self.telemetry:
+            self.telemetry.add("intentional_gap_count")
+            self.telemetry.add("intentional_gap_blocks", last - first + 1)
+        log.warning("Recorded %s blocks=%d..%d; no automatic backfill", kind, first, last)
+
+    async def ws_recover(self, limit, source, gap_kind):
+        head = await self.rpc.head()
+        target = max(0, head - self.config.confirmations)
+        with self.db.conn:
+            self.db.set_state("observed_head", head)
+        checkpoint = self.db.last("live_checkpoint")
+        start = self.db.last("live_start_block")
+        if start is None:
+            start = max(0, target - self.config.live_overlap)
+            with self.db.conn:
+                self.db.set_state("live_start_block", start)
+        first = max(start, checkpoint - self.config.live_overlap if checkpoint is not None else start)
+        if target < first:
+            return
+        if target - first + 1 > limit:
+            # Preserve the tail overlap, but make the old outage visible as a gap.
+            skipped_last = max(first - 1, target - self.config.live_overlap)
+            self.record_gap(gap_kind, first, skipped_last)
+            first = max(start, target - self.config.live_overlap)
+        await self.process_range(first, target, head, source)
+        with self.db.conn:
+            self.db.set_state("live_segment_start", target + 1)
+
+    async def run_ws_first(self, max_batches=None):
+        if not self.feed:
+            raise ValueError("WS-first mode requires a filtered WebSocket endpoint")
+        await self.rpc.check_chain()
+        await self.pons.verify()
+        stamp = self.db.state("stock_assets_synced_at")
+        if stamp is None or (datetime.now(timezone.utc) - datetime.fromisoformat(stamp)).total_seconds() > 172800:
+            await sync_assets(self.config, self.db)
+        self.feed.task = asyncio.create_task(self.feed.run())
+        # Subscription starts before recovery; queued overlap logs are idempotent.
+        for _ in range(int(self.config.timeout)):
+            if self.feed.connected:
+                break
+            await asyncio.sleep(1)
+        if not self.feed.connected:
+            raise RpcError("Filtered WebSocket did not connect")
+        self.feed_connections = self.feed.connections
+        await self.ws_recover(self.config.startup_recovery_max, "startup_recovery", "startup-gap")
+        batches = 0
+        while max_batches is None or batches < max_batches:
+            try:
+                if self.feed.task.done():
+                    # No HTTP completeness loop while the provider is unavailable.
+                    self.feed.task = asyncio.create_task(self.feed.run())
+                if self.feed.connections > self.feed_connections:
+                    self.feed_connections = self.feed.connections
+                    await self.ws_recover(self.config.recovery_max, "reconnect_recovery", "ws-gap")
+                if self.feed.overflowed:
+                    self.feed.overflowed = False
+                    await self.ws_recover(self.config.recovery_max, "reconnect_recovery", "ws-queue-gap")
+                try:
+                    event = await asyncio.wait_for(self.feed.events.get(), self.config.head_healthcheck)
+                except TimeoutError:
+                    head = await self.rpc.head()
+                    with self.db.conn:
+                        self.db.set_state("observed_head", head)
+                    continue
+                if event.get("removed"):
+                    # Removed logs are a reorg signal; bounded recovery verifies the recent event window.
+                    await self.ws_recover(self.config.recovery_max, "reconnect_recovery", "ws-reorg-gap")
+                    continue
+                await self.process_ws_event(event)
+                batches += 1
+            except (RpcError, ValueError, KeyError, TypeError, sqlite3.Error) as exc:
+                log.warning("WS-first processing failed error=%s; event held", type(exc).__name__)
+                await asyncio.sleep(retry_delay(self.config, 1))
+
     async def run(self, max_batches=None):
+        if self.config.transport_mode == "ws_first" and self.cursor == "live_checkpoint":
+            return await self.run_ws_first(max_batches)
         failures, connected, batches = 0, False, 0
         while True:
             try:

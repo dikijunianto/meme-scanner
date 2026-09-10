@@ -87,6 +87,9 @@ class Database:
                 if last is not None:
                     self.set_state("historical_checkpoint", last)
                 self.set_state("phase15_migrated_at", utc_now())
+            if self.state("phase16_migrated_at") is None:
+                self.set_state("phase16_migrated_at", utc_now())
+                self.set_state("phase16_telemetry_started_at", utc_now())
 
     def state(self, key):
         row = self.conn.execute("SELECT value FROM chain_state WHERE key=?", (key,)).fetchone()
@@ -120,6 +123,10 @@ class Database:
     def is_stock(self, address):
         return self.conn.execute("SELECT 1 FROM stock_assets WHERE address=? AND verified=1", (address,)).fetchone() is not None
 
+    def stock_asset(self, address):
+        row = self.conn.execute("SELECT symbol,name FROM stock_assets WHERE address=? AND verified=1", (address,)).fetchone()
+        return dict(row) if row else None
+
     def save_block(self, block, launches, retention):
         # One small SQLite transaction: events and checkpoint succeed together.
         with self.conn:
@@ -145,18 +152,19 @@ class Database:
             self.conn.execute("DELETE FROM coverage WHERE kind=? AND first<=? AND last>=?", (kind, last + 1, first - 1))
         self.conn.execute("INSERT INTO coverage VALUES(?,?,?)", (kind, first, last))
 
-    def save_range(self, blocks, launches, graduations, first, last, cursor, retention):
+    def save_range(self, blocks, launches, graduations, first, last, cursor, retention, coverage_first=None):
         """Commit a completely validated range, its events and coverage together."""
         new_launches = new_stock = 0
         with self.conn:
             for b, items, grads in zip(blocks, launches, graduations):
-                self.conn.execute("INSERT OR REPLACE INTO blocks VALUES(?,?,?,?,?,?)",
-                                  (b.number, b.hash, b.parent, b.timestamp, b.tx_count, utc_now()))
+                if b is not None:
+                    self.conn.execute("INSERT OR REPLACE INTO blocks VALUES(?,?,?,?,?,?)",
+                                      (b.number, b.hash, b.parent, b.timestamp, b.tx_count, utc_now()))
                 for table, records in (("launches", items), ("graduations", grads)):
                     for record in records:
                         existing = self.conn.execute(f"SELECT block_number FROM {table} WHERE tx_hash=? AND log_index=?",
                                                      (record["tx_hash"], record["log_index"])).fetchone()
-                        if existing and existing[0] != b.number:
+                        if existing and existing[0] != record["block_number"]:
                             raise ValueError("Event identity moved without canonical rollback")
                         fields = ",".join(record)
                         inserted = self.conn.execute(f"INSERT INTO {table}({fields}) VALUES({','.join('?' for _ in record)}) "
@@ -164,7 +172,7 @@ class Database:
                         if table == "launches" and inserted:
                             new_launches += 1
                             new_stock += record["is_stock_quote"]
-            self.record_coverage("live" if cursor == "live_checkpoint" else "backfill", first, last)
+            self.record_coverage("live" if cursor == "live_checkpoint" else "backfill", coverage_first or first, last)
             if cursor:
                 self.set_state(cursor, max(last, self.last(cursor) or 0))
             # Keep the original historical anchor and any headers needed by live reorg checks.
@@ -172,6 +180,12 @@ class Database:
             self.conn.execute("DELETE FROM blocks WHERE block_number<? AND block_number!=?",
                               (ceiling - retention + 1, self.last("historical_checkpoint") or -1))
         return new_launches, new_stock
+
+    def record_gap(self, kind, first, last):
+        if not first <= last:
+            return
+        with self.conn:
+            self.record_coverage(kind, first, last)
 
     def rollback_to(self, number, cursor="last_processed_block"):
         with self.conn:

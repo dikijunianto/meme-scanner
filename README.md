@@ -1,4 +1,4 @@
-# meme-scanner — Phase 1.5
+# meme-scanner — Phase 1.6
 
 Read-only Pons V2 launch collection on Robinhood Chain mainnet (4663), Python 3.12,
 SQLite WAL, private provider HTTP and filtered WebSocket logs. No wallet, private keys,
@@ -29,10 +29,13 @@ before extending coverage. Historical fixtures are actual RPC logs, not syntheti
 
 Production requires `ROBINHOOD_RPC_HTTP` from a provider. Configure its private WSS
 endpoint as `ROBINHOOD_RPC_WS`; credentials live only in the protected `.env`.
-Factory/topic-filtered `logs` subscriptions are the default, avoiding the bandwidth
-cost of every chain header. Production live mode rejects `newHeads` subscriptions.
-Notifications coalesce into one wakeup. All launches and graduations in the live range
-are recovered with filtered, bounded HTTP log ranges, including after disconnects.
+Factory/topic-filtered `logs` subscriptions are the default. `LIVE_TRANSPORT_MODE=ws_first`
+persists each verified WebSocket event directly; it does not turn each notification into
+a range scan. Non-stock launches store the minimal event record without metadata or a
+block-header request (their timestamp is the UTC observation time). Stock launches and
+graduations pin their contract calls to the event block number; headers are used during
+bounded HTTP recovery and reconciliation.
+Notifications queue independently of bounded recovery.
 Live startup begins at current head minus `LIVE_START_OVERLAP_BLOCKS=5`, then processes
 through head minus three confirmations. Existing historical coverage remains paused.
 Backfill does not pay for unused live notifications.
@@ -153,9 +156,11 @@ The manual command uses the same writer lock and refuses to run alongside the se
 It records exact coverage and never moves either historical or live checkpoint. A
 contradiction with stored history stops it; it cannot roll back a newer live range.
 Choose small ranges so this exclusive writer does not cause a long live outage.
-HTTP recovery is limited to `LIVE_RECOVERY_MAX_BLOCKS=10000` pending blocks and
-ten-block provider queries. A larger outage stops for operator review without skipping.
-It must be resolved explicitly; raising that bound consumes additional free quota.
+Startup recovery is limited to `LIVE_MAX_STARTUP_RECOVERY_BLOCKS=500`; reconnect,
+removed-log, and queue-overflow recovery use `LIVE_MAX_RECOVERY_BLOCKS=1000`. Larger
+outages are written as explicit `startup-gap`/`ws-gap` coverage and only the overlap
+tail is recovered. They are never silently scanned or retried as a full-chain loop.
+Manual backfill remains explicit and uses ten-block provider queries.
 The public RPC is never used to evade an exhausted private quota.
 
 `rpc_usage` stores minute counters for up to 90 days, including HTTP envelopes,
@@ -188,6 +193,7 @@ overlap, orphan cleanup, deep-fork stop, read-only RPC validation, response ID v
 bounded jitter/backoff, shrinking log ranges, and disconnect recovery. Live deployment evidence and remaining limitations
 are recorded in `docs/phase1-report.md`.
 
-Phase 2 is not implemented. Phase 1.5 adds verified graduation identity and live-first
+Phase 2 is not implemented. Phase 1.6 adds WS-first low-cost monitoring, while preserving verified graduation identity and live-first
 coverage, not FDV, liquidity, prices, volume, scoring, signals, or trading.
-Deployment/backup evidence and rollback instructions: [Phase 1.5 report](docs/phase15-report.md).
+Deployment/backup evidence and rollback instructions: [Phase 1.5 report](docs/phase15-report.md)
+and [Phase 1.6 report](docs/phase16-report.md).

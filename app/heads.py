@@ -26,6 +26,8 @@ class HeadFeed:
         self.connected = False
         self.task = None
         self.changed = asyncio.Event()
+        self.events = asyncio.Queue(maxsize=1024)
+        self.overflowed = False
 
     def latest(self):
         return self.number if (self.config.ws_subscription == "newHeads" and self.connected
@@ -80,6 +82,14 @@ class HeadFeed:
                             self.number = quantity(head["blockNumber"])
                             if self.telemetry:
                                 self.telemetry.add("ws_log_notifications")
+                                self.telemetry.add("ws_events_processed")
+                                self.telemetry.add("ws_launch_events" if head["topics"][0].lower() == EVENT_TOPICS[0]
+                                                   else "ws_graduation_events")
+                            try:
+                                self.events.put_nowait(head)
+                            except asyncio.QueueFull:
+                                # Queue overflow means event completeness is unknown; the watcher records a gap.
+                                self.overflowed = True
                         else:
                             hash32(head["hash"])
                             hash32(head["parentHash"])
