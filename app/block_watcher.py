@@ -18,15 +18,19 @@ class DeepReorg(RuntimeError):
 
 
 class Watcher:
-    def __init__(self, config, rpc, db, feed=None):
+    def __init__(self, config, rpc, db, feed=None, *, cursor="last_processed_block", telemetry=None):
         self.config, self.rpc, self.db = config, rpc, db
-        self.pons = Pons(rpc, config, db)
+        self.cursor, self.telemetry = cursor, telemetry
+        self.pons = Pons(rpc, config, db, telemetry)
+        self.pons.include_graduations = cursor != "last_processed_block"
         self.next_block = None
         self.last_sync = float("-inf")
         self.feed = feed
+        self.feed_connections = 0
+        self.recovery_end = None
 
     async def reconcile(self, target):
-        last = self.db.last()
+        last = self.db.last(self.cursor)
         if last is None:
             return
         # A lagging RPC must not erase canonical state.
@@ -41,7 +45,9 @@ class Watcher:
             "ORDER BY block_number DESC", (last, max(0, last - self.config.reorg_depth))).fetchall()
         for number, stored in ancestors:
             if (await self.rpc.block(number)).hash == stored:
-                self.db.rollback_to(number)
+                if self.cursor == "live_checkpoint" and number < int(self.db.state("live_start_block")):
+                    raise DeepReorg("Reorg predates live coverage; operator review required")
+                self.db.rollback_to(number, self.cursor)
                 self.next_block = number + 1
                 log.warning("Reorg rolled back to ancestor=%d", number)
                 return
@@ -52,6 +58,28 @@ class Watcher:
         if head is None:
             head = await self.rpc.head()
         target = max(0, head - self.config.confirmations)
+        if self.cursor == "live_checkpoint":
+            with self.db.conn:
+                self.db.set_state("observed_head", head)
+            last_live = self.db.last(self.cursor)
+            start_live = self.db.last("live_start_block")
+            if start_live is None:
+                start_live = max(0, head - self.config.live_overlap)
+                with self.db.conn:
+                    self.db.set_state("live_start_block", start_live)
+                log.info("Live mode begins at %d; historical checkpoint=%s remains paused",
+                         start_live, self.db.state("historical_checkpoint"))
+            if self.next_block is None:
+                self.next_block = max(start_live, last_live - self.config.live_overlap if last_live is not None else start_live)
+                self.recovery_end = target if last_live is not None else None
+            connections = self.feed.connections if self.feed else 0
+            if connections > self.feed_connections:
+                if self.feed_connections and last_live is not None:
+                    self.next_block = max(start_live, last_live - self.config.live_overlap)
+                    self.recovery_end = target
+                self.feed_connections = connections
+            if target - self.next_block + 1 > self.config.recovery_max:
+                raise DeepReorg("Live recovery exceeds configured bound; checkpoint held; explicit backfill required")
         await self.reconcile(head)
         if self.next_block is None:
             last = self.db.last()
@@ -69,6 +97,9 @@ class Watcher:
             log.debug("Latest block=%d checkpoint=%s", head, self.db.last())
             return 0
         last = min(target, first + self.config.batch - 1)
+        return await self.process_range(first, last, head)
+
+    async def process_range(self, first, last, head):
         anchor = await self.rpc.block(last)
         events = await self.pons.logs(first, last)
         grouped = defaultdict(list)
@@ -80,12 +111,20 @@ class Watcher:
         # Scan every block's logs, but fetch headers only for launches and range
         # boundaries. This avoids full header indexing on the rate-limited RPC.
         needed = sorted({first, last, *grouped})
+        cached = {number: self.db.block(number) for number in needed}
+        fetched = {}
+        if self.cursor != "last_processed_block":
+            missing = [n for n in needed if n != last and cached[n] is None]
+            fetched = {b.number: b for b in await self.rpc.blocks(missing)} if missing else {}
         blocks = []
         for number in needed:
             # Stored headers are reusable after reconcile verified their canonical
             # checkpoint. Only checkpoint and range-end hash checks need fresh reads.
-            stored = self.db.block(number)
-            blocks.append(anchor if number == last else stored or await self.rpc.block(number))
+            stored = cached[number]
+            if self.cursor is None and stored and (await self.rpc.block(number)).hash != stored.hash:
+                # Manual work must never roll back a newer live range.
+                raise DeepReorg("Backfill contradicts persisted history; operator review required")
+            blocks.append(anchor if number == last else stored or fetched.get(number) or await self.rpc.block(number))
         if blocks[-1].hash != anchor.hash:
             raise RpcError("Batch changed during log read")
         # Validate the complete batch before committing any part of it.
@@ -101,12 +140,25 @@ class Watcher:
         for result in enriched:
             if isinstance(result, BaseException):
                 raise result
+        graduations = ([await self.pons.graduations(grouped[b.number], b) for b in blocks]
+                       if self.pons.include_graduations else [[] for _ in blocks])
         if (await self.rpc.block(last)).hash != anchor.hash:
             raise RpcError("Batch changed during enrichment")
-        for block, launches in zip(blocks, enriched):
-            self.db.save_block(block, launches, self.config.retention)
-            self.next_block = block.number + 1
-        log.info("Processed blocks=%d..%d latest=%d launches=%d", first, last, head, len(events))
+        if self.cursor == "last_processed_block":
+            for block, launches in zip(blocks, enriched):
+                self.db.save_block(block, launches, self.config.retention)
+        else:
+            launches, stock = self.db.save_range(blocks, enriched, graduations, first, last,
+                                                  self.cursor, self.config.retention)
+            if self.telemetry:
+                self.telemetry.add("launches_received", launches)
+                self.telemetry.add("stock_paired_launches", stock)
+                if self.recovery_end is not None:
+                    self.telemetry.add("blocks_recovered", max(0, min(last, self.recovery_end) - first + 1))
+            if self.recovery_end is not None and last >= self.recovery_end:
+                self.recovery_end = None
+        self.next_block = last + 1
+        log.info("Processed blocks=%d..%d latest=%d events=%d", first, last, head, len(events))
         return last - first + 1
 
     async def run(self, max_batches=None):

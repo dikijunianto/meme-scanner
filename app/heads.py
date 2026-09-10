@@ -9,14 +9,15 @@ from eth_utils import to_checksum_address
 
 from app.models import hash32, quantity
 from app.rpc import Rpc, RpcError, retry_delay
-from app.pons import TOPIC
+from app.pons import EVENT_TOPICS
 
 log = logging.getLogger(__name__)
 
 
 class HeadFeed:
-    def __init__(self, config):
+    def __init__(self, config, telemetry=None):
         self.config = config
+        self.telemetry = telemetry
         self.number = None
         self.received_at = 0.0
         self.count = 0
@@ -41,7 +42,7 @@ class HeadFeed:
                     chain = Rpc.result(json.loads(await asyncio.wait_for(socket.recv(), self.config.timeout)), 1, "eth_chainId")
                     if quantity(chain) != self.config.chain_id:
                         raise RpcError("WebSocket returned the wrong chain")
-                    params = (["logs", {"address": list(self.config.factories), "topics": [TOPIC]}]
+                    params = (["logs", {"address": list(self.config.factories), "topics": [EVENT_TOPICS]}]
                               if self.config.ws_subscription == "logs" else ["newHeads"])
                     await socket.send(json.dumps({"jsonrpc": "2.0", "id": 2,
                                                   "method": "eth_subscribe", "params": params}))
@@ -49,13 +50,22 @@ class HeadFeed:
                     if not isinstance(subscription, str) or not subscription:
                         raise RpcError("Invalid subscription ID")
                     self.connections += 1
+                    if self.telemetry:
+                        if self.telemetry.db.state("websocket_connected_once") == "1":
+                            self.telemetry.add("ws_reconnects")
+                        with self.telemetry.db.conn:
+                            self.telemetry.db.set_state("websocket_connected_once", 1)
+                        self.telemetry.status("connected")
                     started = time.monotonic()
                     self.connected = True
+                    self.changed.set()
                     log.info("WebSocket %s subscribed chain=%d", self.config.ws_subscription, self.config.chain_id)
                     while True:
                         raw = (await asyncio.wait_for(socket.recv(), 60) if self.config.ws_subscription == "newHeads"
                                else await socket.recv())
                         self.bytes_received += len(raw.encode() if isinstance(raw, str) else raw)
+                        if self.telemetry:
+                            self.telemetry.add("ws_bytes", len(raw.encode() if isinstance(raw, str) else raw))
                         message = json.loads(raw)
                         params = message.get("params", {})
                         if (message.get("jsonrpc") != "2.0" or message.get("method") != "eth_subscription"
@@ -64,10 +74,12 @@ class HeadFeed:
                         head = params["result"]
                         if self.config.ws_subscription == "logs":
                             if (to_checksum_address(head["address"]) not in self.config.factories
-                                    or head["topics"][0].lower() != TOPIC):
+                                    or head["topics"][0].lower() not in EVENT_TOPICS):
                                 raise RpcError("Unexpected log subscription result")
                             hash32(head["blockHash"])
                             self.number = quantity(head["blockNumber"])
+                            if self.telemetry:
+                                self.telemetry.add("ws_log_notifications")
                         else:
                             hash32(head["hash"])
                             hash32(head["parentHash"])
@@ -93,3 +105,5 @@ class HeadFeed:
                 await asyncio.sleep(delay)
             finally:
                 self.connected = False
+                if self.telemetry:
+                    self.telemetry.status("disconnected")

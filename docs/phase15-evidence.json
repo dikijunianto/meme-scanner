@@ -1,0 +1,130 @@
+{
+  "production": {
+    "at_utc": "2026-09-10T09:06:33.715340+00:00",
+    "mode": "live",
+    "systemd": {
+      "MainPID": "324858",
+      "NRestarts": "0",
+      "MemoryCurrent": "58437632",
+      "CPUUsageNSec": "365536031000",
+      "ActiveState": "active",
+      "SubState": "running"
+    },
+    "rss_bytes": 61431808,
+    "coverage": {
+      "historical_launch_coverage": [
+        57941820,
+        58013614
+      ],
+      "phase15_event_coverage": [
+        [
+          "backfill",
+          58013387,
+          58013387
+        ],
+        [
+          "live",
+          58732202,
+          59283085
+        ]
+      ],
+      "unprocessed_gaps": [
+        [
+          58013615,
+          58732201
+        ]
+      ],
+      "live_start_block": "58732202",
+      "live_checkpoint": 59283085,
+      "current_head": 59283141,
+      "live_lag_blocks": 56,
+      "unprocessed_tail": [
+        59283086,
+        59283141
+      ],
+      "note": "Historical range covers launches only; phase15 ranges cover launches and graduations. Gaps exclude the unprocessed head tail."
+    },
+    "state": {
+      "chain_id": "4663",
+      "stock_assets_synced_at": "2026-09-09T17:47:01+00:00",
+      "scan_start_block": "57941820",
+      "last_processed_block": "58013614",
+      "historical_checkpoint": "58013614",
+      "phase15_migrated_at": "2026-09-09T17:39:57+00:00",
+      "telemetry_started_at": "2026-09-09T17:40:00.549109+00:00",
+      "observed_head": "59283088",
+      "live_start_block": "58732202",
+      "websocket_status": "connected",
+      "live_checkpoint": "59283085",
+      "websocket_connected_once": "1"
+    },
+    "telemetry": {
+      "label": "LOCAL OBSERVATIONS \u2014 NOT ACCOUNT BILLING DATA",
+      "requested_hours": 1,
+      "telemetry_started_at": "2026-09-09T17:40:00.549109+00:00",
+      "elapsed_hours": 15.4425,
+      "full_window_elapsed": true,
+      "bucket_seconds": 60,
+      "websocket_last_recorded_status": "connected",
+      "counters": {
+        "http_total": 6997,
+        "launches_received": 470,
+        "metadata_calls": 1352,
+        "method:eth_blockNumber": 500,
+        "method:eth_call": 1367,
+        "method:eth_getBlockByNumber": 2460,
+        "method:eth_getLogs": 3815,
+        "stock_paired_launches": 162,
+        "ws_bytes": 450341,
+        "ws_log_notifications": 476
+      },
+      "note": "Missing counters mean zero. Counts include retries; method calls count batch members separately from HTTP envelopes. WebSocket bytes are notification payloads, excluding handshake/framing. Failed requests count failed envelopes. No billing or CU projection is claimed."
+    },
+    "counts": {
+      "launches": 15153,
+      "graduations": 160,
+      "stock_assets": 194,
+      "blocks": 442
+    },
+    "stock_paired": 6988,
+    "integrity": "ok",
+    "journal_mode": "wal",
+    "original_launch_rows_missing_or_changed": 0,
+    "original_asset_identities_missing": 0,
+    "duplicates": {
+      "launches": 0,
+      "graduations": 0
+    },
+    "missing_metadata": 0,
+    "db_bytes": 11907072,
+    "wal_bytes": 4264232,
+    "env_mode": "0o600",
+    "ufw": "Status: active\n\nTo                         Action      From\n--                         ------      ----\nOpenSSH                    ALLOW       Anywhere                  \nOpenSSH (v6)               ALLOW       Anywhere (v6)             \n\n",
+    "listeners": "State  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0      4096      127.0.0.54:53        0.0.0.0:*          \nLISTEN 0      4096         0.0.0.0:22        0.0.0.0:*          \nLISTEN 0      4096   127.0.0.53%lo:53        0.0.0.0:*          \nLISTEN 0      4096            [::]:22           [::]:*          \n"
+  },
+  "restart": {
+    "before_live_checkpoint": 58736116,
+    "after_live_checkpoint": 58736182,
+    "historical_checkpoint": 58013614,
+    "live_start_block": 58732202,
+    "websocket_status": "connected",
+    "seconds": 7.13
+  },
+  "baseline": {
+    "state": {
+      "chain_id": "4663",
+      "stock_assets_synced_at": "2026-09-09T16:15:32+00:00",
+      "scan_start_block": "57941820",
+      "last_processed_block": "58013614"
+    },
+    "counts": {
+      "launches": 3968,
+      "blocks": 689,
+      "stock_assets": 194
+    },
+    "stock_paired": 2242,
+    "journal_mode": "wal",
+    "head": 58723374,
+    "backup": "/opt/meme-scanner/data/phase15-backup/scanner-before.db"
+  }
+}

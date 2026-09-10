@@ -56,8 +56,9 @@ class Rpc:
     ALLOWED = {"eth_chainId", "eth_blockNumber", "eth_getBlockByNumber",
                "eth_getLogs", "eth_call", "eth_getCode"}
 
-    def __init__(self, config):
+    def __init__(self, config, telemetry=None):
         self.config = config
+        self.telemetry = telemetry
         self.client = httpx.AsyncClient(timeout=config.timeout, limits=httpx.Limits(max_connections=4),
                                         headers={"User-Agent": "meme-scanner/0.1 (read-only monitor)"})
         self.ids = itertools.count(1)
@@ -77,6 +78,10 @@ class Rpc:
             return await self._send(payload, method)
 
     async def _send(self, payload, method):
+        if self.telemetry:
+            self.telemetry.add("http_total")
+            for item in payload if isinstance(payload, list) else [payload]:
+                self.telemetry.add("method:" + item["method"])
         try:
             async with self.client.stream("POST", self.config.rpc_http, json=payload) as response:
                 response.raise_for_status()
@@ -88,6 +93,8 @@ class Rpc:
             return json.loads(body)
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
+            if status == 429 and self.telemetry:
+                self.telemetry.add("http_429")
             if status == 429 or status >= 500:
                 raise RetryableRpcError(f"{method}: HTTP {status}",
                                         retry_after_seconds(exc.response.headers.get("Retry-After"))) from None
@@ -136,15 +143,26 @@ class Rpc:
             try:
                 return parse(await self.request(payload, method))
             except RetryableRpcError as exc:
+                if self.telemetry:
+                    self.telemetry.add("failed_requests")
+                    if "rate limit" in str(exc):
+                        self.telemetry.add("rpc_rate_limits")
                 if attempt == self.config.retry_attempts:
                     log.error("%s; attempts exhausted (%d); checkpoint held", exc, attempt)
                     raise RetriesExhausted("RPC retry budget exhausted; operator review required") from None
                 delay = retry_delay(self.config, attempt, exc.retry_after)
+                if self.telemetry:
+                    self.telemetry.add("retries")
                 log.warning("%s; attempt=%d/%d backoff=%.2fs", exc, attempt, self.config.retry_attempts, delay)
                 await asyncio.sleep(delay)
+            except (RpcError, ContractCallError):
+                if self.telemetry:
+                    self.telemetry.add("failed_requests")
+                raise
 
     async def batch(self, calls):
-        if not 1 <= len(calls) <= 50 or any(method not in self.ALLOWED for method, _ in calls):
+        # Five envelopes/second x at most five members stays within 25 calls/second.
+        if not 1 <= len(calls) <= 5 or any(method not in self.ALLOWED for method, _ in calls):
             raise ValueError("Invalid read-only batch")
         payload = [{"jsonrpc": "2.0", "id": next(self.ids), "method": method, "params": params}
                    for method, params in calls]
@@ -179,3 +197,14 @@ class Rpc:
         if block.number != number:
             raise ValueError("RPC returned a different block number")
         return block
+
+    async def blocks(self, numbers):
+        result = []
+        for offset in range(0, len(numbers), 5):
+            selected = numbers[offset:offset + 5]
+            raw = await self.batch([("eth_getBlockByNumber", [hex(n), False]) for n in selected])
+            parsed = [Block.parse(item) for item in raw]
+            if [b.number for b in parsed] != selected:
+                raise ValueError("RPC returned different block numbers in batch")
+            result.extend(parsed)
+        return result

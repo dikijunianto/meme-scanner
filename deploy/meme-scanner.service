@@ -11,6 +11,7 @@ WorkingDirectory=/opt/meme-scanner
 Environment=SCANNER_ENV=/opt/meme-scanner/config/.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=SCANNER_MODE=live
 ExecStart=/opt/meme-scanner/.venv/bin/python -m app.main
 Restart=on-failure
 RestartPreventExitStatus=2 3

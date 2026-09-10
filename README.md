@@ -1,7 +1,7 @@
-# meme-scanner — Phase 1
+# meme-scanner — Phase 1.5
 
 Read-only Pons V2 launch collection on Robinhood Chain mainnet (4663), Python 3.12,
-SQLite WAL, private provider HTTP and WebSocket heads. No wallet, private keys,
+SQLite WAL, private provider HTTP and filtered WebSocket logs. No wallet, private keys,
 signing, swaps, or trading.
 
 ## Verified integration
@@ -20,7 +20,9 @@ Research checked 2026-09-09; source snapshots can become stale.
 
 The event emits token, curve, deployer, pairToken, launchConfigId and graduationThreshold.
 Zero pairToken means native ETH. The bonding curve has its own column; no Uniswap
-pool exists yet at launch. Graduation/pool IDs belong to a later phase.
+pool exists yet at launch. `graduations` records verified `PoolGraduated` events,
+factory launch snapshots, and the canonical V4 PoolKey/PoolId (not a pool address).
+See [graduation evidence](docs/phase15-graduation.md).
 The minimal ABI and source links are in `app/pons.py`. Older V2 and V1 deployments
 are excluded deliberately: their addresses/versions must be independently verified
 before extending coverage. Historical fixtures are actual RPC logs, not synthetic examples.
@@ -28,17 +30,20 @@ before extending coverage. Historical fixtures are actual RPC logs, not syntheti
 Production requires `ROBINHOOD_RPC_HTTP` from a provider. Configure its private WSS
 endpoint as `ROBINHOOD_RPC_WS`; credentials live only in the protected `.env`.
 Factory/topic-filtered `logs` subscriptions are the default, avoiding the bandwidth
-cost of every chain header. Optional `ROBINHOOD_WS_SUBSCRIPTION=newHeads` was also
-tested. Notifications coalesce into one wakeup. All launches
+cost of every chain header. Production live mode rejects `newHeads` subscriptions.
+Notifications coalesce into one wakeup. All launches and graduations in the live range
 are recovered with filtered, bounded HTTP log ranges, including after disconnects.
-Subscriptions start only near the head; backfill does not pay for unused live notifications.
+Live startup begins at current head minus `LIVE_START_OVERLAP_BLOCKS=5`, then processes
+through head minus three confirmations. Existing historical coverage remains paused.
+Backfill does not pay for unused live notifications.
 After bounded WS reconnect attempts, the same private HTTP endpoint supplies heads.
 The official public RPC is optional basic connectivity only (`test_rpc.py --fallback`),
 never an automatic production failover. Its sequencer feed is not `eth_subscribe`.
 
 Requests are paced at five HTTP requests/second, with at most four in flight.
-Metadata uses two-call batches, so the maximum logical-call rate remains below the
-user's stated 25 requests/second plan limit. Batching does not reduce billed CUs.
+Metadata uses two-call batches; missing headers use batches of at most five. No batch
+can exceed five members, keeping the logical-call rate within the user's stated
+25 requests/second plan limit. Batching reduces HTTP overhead, not billed CUs.
 HTTP 429/5xx and transport failures retry up to five total attempts, with exponential
 backoff, jitter, Retry-After support, and a 60-second maximum. Exhaustion stops with
 exit 3; systemd does not silently reset the retry budget. Review the provider/quota
@@ -49,7 +54,7 @@ applies to historical and live scans; rejected ranges shrink, without skipping b
 The 30M monthly CU allowance is separate from request throughput. At approximately
 10 blocks/second and 60 CU/query, complete ten-block HTTP log coverage alone projects
 to 155.5M CU per 30 days. WebSocket notifications and enrichment add usage. This
-implementation preserves full coverage; it cannot promise continuous operation within
+implementation preserves full coverage of its selected live range; it cannot promise continuous operation within
 30M CU. See [Alchemy's chain limits](https://www.alchemy.com/docs/chains/robinhood-chain/robinhood-chain-api-endpoints/eth-get-logs)
 and [CU pricing](https://www.alchemy.com/docs/reference/compute-unit-costs).
 
@@ -72,7 +77,6 @@ mkdir -p data logs
 .venv/bin/python scripts/init_db.py
 .venv/bin/python scripts/inspect_recent_blocks.py --count 5
 .venv/bin/python scripts/sync_stock_assets.py
-.venv/bin/python scripts/inspect_launches.py --max-blocks 10000 --find-stock --output data/historical-evidence.json
 .venv/bin/python -m app.main --max-batches 3
 .venv/bin/python -m app.main --max-batches 3  # demonstrate restart/overlap
 ```
@@ -103,8 +107,12 @@ firewall/SSH changes. Root ownership applies only to the installed unit.
 
 ## Data and recovery
 
-`chain_state` stores chain identity, scan start, last committed block and registry
-sync time. Every block in each range is scanned for logs. `blocks` stores compact
+`chain_state` preserves the original `scan_start_block` and `last_processed_block`.
+An atomic, additive migration copies the old checkpoint into `historical_checkpoint`
+once. `live_start_block` and `live_checkpoint` are independent. The `coverage` table
+merges committed live/manual ranges; historical launch coverage does not imply historical
+graduation coverage. Every block in each selected range is scanned for filtered logs.
+`blocks` stores compact
 headers/counts only for launch blocks and range boundaries, avoiding full header indexing.
 `launches` stores normalized
 events and optional metadata with `UNIQUE(tx_hash,log_index)` plus five query indexes.
@@ -120,19 +128,42 @@ sqlite3 /opt/meme-scanner/data/scanner.db \
 ```
 
 Only committed blocks advance the cursor; events and cursor share one transaction.
-Restart replays five blocks by default. Confirmations default to three; this is
+Restart resumes from the live checkpoint minus five overlap blocks. Confirmations default to three; this is
 best-effort L2 reorg protection, not Ethereum settlement finality. Parent hashes and
 the checkpoint are checked against RPC. A detected fork rolls back orphan headers
-and launches to a common ancestor. A deeper fork stops with exit 2, without automatic
+and launch/graduation events to a common ancestor within live coverage. A deeper fork stops with exit 2, without automatic
 systemd restart: review the chain/provider, restore a consistent backup or choose a
-new database with an explicit bounded START_BLOCK. Do not edit only the checkpoint.
+new database after investigating. Do not edit only a checkpoint or erase gap evidence.
 
-First start begins near the head unless START_BLOCK is set. START_BLOCK applies only
-to a fresh database; changing it does not rewind an existing checkpoint. For a separate
-backfill, stop the service and use a separate `.env`/database, or raise OVERLAP_BLOCKS
-within the retained history. Never run two watchers against the same database.
-The historical inspection command prints evidence without moving the watcher cursor;
-expand `--max-blocks` responsibly (maximum 1,000,000 per invocation).
+`SCANNER_MODE=live` is the default and is also set explicitly in systemd. It ignores
+legacy `START_BLOCK`. `BACKFILL_ENABLED=false` is mandatory: no automatic historical
+worker or hybrid mode is enabled. Manual backfill requires explicit inclusive bounds:
+
+```sh
+cd /opt/meme-scanner
+sudo systemctl stop meme-scanner
+.venv/bin/python -m app.backfill --from-block 58013387 --to-block 58013387
+sudo systemctl start meme-scanner
+.venv/bin/python scripts/show_coverage.py
+.venv/bin/python scripts/rpc_usage_report.py --hours 24
+.venv/bin/python scripts/rpc_usage_report.py --hours 72
+```
+
+The manual command uses the same writer lock and refuses to run alongside the service.
+It records exact coverage and never moves either historical or live checkpoint. A
+contradiction with stored history stops it; it cannot roll back a newer live range.
+Choose small ranges so this exclusive writer does not cause a long live outage.
+HTTP recovery is limited to `LIVE_RECOVERY_MAX_BLOCKS=10000` pending blocks and
+ten-block provider queries. A larger outage stops for operator review without skipping.
+It must be resolved explicitly; raising that bound consumes additional free quota.
+The public RPC is never used to evade an exhausted private quota.
+
+`rpc_usage` stores minute counters for up to 90 days, including HTTP envelopes,
+individual batch methods, failures, retries, 429s, WebSocket notification bytes,
+reconnects, new launch records, stock pairs, metadata calls, and recovery blocks.
+Reports use no RPC calls and expose no endpoint URLs. They show actual elapsed time;
+a requested 72-hour window is not a completed 72-hour observation until time has passed.
+These are local counts, not account billing or CU estimates.
 
 Malformed events hold the block cursor and retry, so they cannot silently disappear.
 Broken/bytes32/reverting metadata produces null fields without losing the event.
@@ -157,5 +188,6 @@ overlap, orphan cleanup, deep-fork stop, read-only RPC validation, response ID v
 bounded jitter/backoff, shrinking log ranges, and disconnect recovery. Live deployment evidence and remaining limitations
 are recorded in `docs/phase1-report.md`.
 
-Phase 2 is not implemented. Its next step is to verify graduation events and the
-curve-to-V4 pool mapping before collecting liquidity/FDV/volume measurements.
+Phase 2 is not implemented. Phase 1.5 adds verified graduation identity and live-first
+coverage, not FDV, liquidity, prices, volume, scoring, signals, or trading.
+Deployment/backup evidence and rollback instructions: [Phase 1.5 report](docs/phase15-report.md).

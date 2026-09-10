@@ -18,7 +18,7 @@ import asyncio
 import logging
 import re
 
-from eth_abi import decode
+from eth_abi import decode, encode
 from eth_utils import keccak, to_checksum_address
 
 from app.models import hash32, quantity, utc_now
@@ -112,9 +112,11 @@ async def metadata(rpc, address, block_number):
 
 
 class Pons:
-    def __init__(self, rpc, config, db):
+    def __init__(self, rpc, config, db, telemetry=None):
         self.rpc, self.config, self.db = rpc, config, db
+        self.telemetry = telemetry
         self.log_span = config.log_span
+        self.include_graduations = False
 
     async def verify(self):
         for address in self.config.factories:
@@ -130,7 +132,8 @@ class Pons:
             end = min(last, first + self.log_span - 1)
             try:
                 part = await self.rpc.call("eth_getLogs", [{
-                    "address": list(self.config.factories), "topics": [TOPIC],
+                    "address": list(self.config.factories),
+                    "topics": [EVENT_TOPICS if self.include_graduations else TOPIC],
                     "fromBlock": hex(first), "toBlock": hex(end),
                 }])
             except LogRangeError:
@@ -149,6 +152,8 @@ class Pons:
     async def launches(self, events, block):
         launches = []
         for event in events:
+            if event["topics"][0].lower() == GRADUATION_TOPIC:
+                continue
             try:
                 launch = decode_launch(event, block, self.config.factories)
             except Exception:
@@ -161,6 +166,8 @@ class Pons:
                 existing["is_stock_quote"] = int(self.db.is_stock(existing["quote_asset_address"]))
                 launches.append(existing)
                 continue
+            if self.telemetry:
+                self.telemetry.add("metadata_calls", 2 + (2 if launch["quote_asset_address"] != ZERO else 0))
             token, quote = await asyncio.gather(
                 metadata(self.rpc, launch["token_address"], block.number),
                 metadata(self.rpc, launch["quote_asset_address"], block.number))
@@ -172,3 +179,68 @@ class Pons:
                      block.number, launch["token_address"], launch["quote_asset_address"],
                      bool(launch["is_stock_quote"]), launch["tx_hash"])
         return launches
+
+    async def graduations(self, events, block):
+        result = []
+        for event in events:
+            if event["topics"][0].lower() != GRADUATION_TOPIC:
+                continue
+            existing = self.db.conn.execute("SELECT * FROM graduations WHERE tx_hash=? AND log_index=?",
+                                            (hash32(event["transactionHash"]), quantity(event["logIndex"]))).fetchone()
+            if existing:
+                row = dict(existing)
+                row.pop("id")
+                # Validate replay identity against the current canonical header too.
+                validate_graduation(event, block, self.config.factories)
+                if row["block_number"] != block.number:
+                    raise ValueError("Graduation identity moved without reorg reconciliation")
+                result.append(row)
+                continue
+            token = validate_graduation(event, block, self.config.factories)
+            calls = [("eth_call", [{"to": event["address"], "data": "0x" + keccak(text=sig).hex()[:8]
+                       + (encode(["address"], [token]).hex() if sig == "getLaunchedToken(address)" else "")},
+                       hex(block.number)]) for sig in ("getLaunchedToken(address)", "poolManager()", "memeHook()")]
+            state, manager, hook = await self.rpc.batch(calls)
+            result.append(decode_graduation(event, block, self.config.factories, state, manager, hook))
+        return result
+
+
+GRADUATION_SIGNATURE = "PoolGraduated(address,uint256,uint256,uint256)"
+GRADUATION_TOPIC = "0x" + keccak(text=GRADUATION_SIGNATURE).hex()
+EVENT_TOPICS = [TOPIC, GRADUATION_TOPIC]
+LAUNCH_STATE_TYPES = ["address"] * 5 + ["uint256", "uint24", "int24", "uint16", "bool", "uint8",
+                                                  "uint256", "uint256", "uint256", "bool"]
+
+
+def validate_graduation(event, block, factories):
+    if (to_checksum_address(event["address"]) not in factories or len(event["topics"]) != 2
+            or event["topics"][0].lower() != GRADUATION_TOPIC or event.get("removed", False) is not False
+            or hash32(event["blockHash"]) != block.hash or quantity(event["blockNumber"]) != block.number
+            or len(hex_data(event["data"])) != 96):
+        raise ValueError("Invalid graduation event or canonical block")
+    token = to_checksum_address(decode(["address"], hex_data(hash32(event["topics"][1])))[0])
+    if token == ZERO:
+        raise ValueError("Zero graduation token")
+    return token
+
+
+def decode_graduation(event, block, factories, state_raw, manager_raw, hook_raw):
+    token = validate_graduation(event, block, factories)
+    state = decode(LAUNCH_STATE_TYPES, hex_data(state_raw))
+    addresses = [to_checksum_address(a) for a in state[:5]]
+    manager = to_checksum_address(decode(["address"], hex_data(manager_raw))[0])
+    hook = to_checksum_address(decode(["address"], hex_data(hook_raw))[0])
+    if (addresses[0] != token or not state[14] or state[10] != 2 or state[7] <= 0
+            or ZERO in (addresses[1], addresses[2], manager, hook) or token == addresses[4]):
+        raise ValueError("Factory state contradicts graduation")
+    currency0, currency1 = sorted((token, addresses[4]), key=lambda a: int(a, 16))
+    pool_id = "0x" + keccak(encode(["address", "address", "uint24", "int24", "address"],
+                                   [currency0, currency1, state[6], state[7], hook])).hex()
+    position, tokens, quote = decode(["uint256"] * 3, hex_data(event["data"]))
+    return dict(tx_hash=hash32(event["transactionHash"]), log_index=quantity(event["logIndex"]),
+                block_number=block.number, block_timestamp=block.timestamp,
+                factory_address=to_checksum_address(event["address"]), token_address=token,
+                quote_asset_address=addresses[4], curve_address=addresses[1], creator_address=addresses[2],
+                pool_id=pool_id, pool_manager_address=manager, currency0=currency0, currency1=currency1,
+                fee=state[6], tick_spacing=state[7], hooks=hook, position_id=str(position),
+                token_amount=str(tokens), quote_amount=str(quote), raw_event_name="PoolGraduated", detected_at=utc_now())

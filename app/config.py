@@ -34,6 +34,9 @@ class Config:
     retry_base: float = 2
     log_span: int = 10
     ws_subscription: str = "logs"
+    mode: str = "live"
+    live_overlap: int = 5
+    recovery_max: int = 10000
 
     @classmethod
     def load(cls):
@@ -89,7 +92,10 @@ class Config:
                      number("RPC_MAX_ATTEMPTS", 5, True, 1),
                      number("RETRY_BASE_SECONDS", 2, minimum=1),
                      number("LOG_BLOCK_RANGE", 10, True, 1),
-                     env.get("ROBINHOOD_WS_SUBSCRIPTION") or "logs")
+                     env.get("ROBINHOOD_WS_SUBSCRIPTION") or "logs",
+                     os.environ.get("SCANNER_MODE") or env.get("SCANNER_MODE") or "live",
+                     number("LIVE_START_OVERLAP_BLOCKS", 5, True, 1),
+                     number("LIVE_RECOVERY_MAX_BLOCKS", 10000, True, 1))
         if result.batch > 500 or result.retention <= max(result.reorg_depth, result.overlap):
             raise ValueError("Batch must be <=500; retention must exceed overlap and reorg depth")
         if result.start_block is not None and result.start_block < 0:
@@ -98,4 +104,14 @@ class Config:
             raise ValueError("RPC_MAX_ATTEMPTS must be <=10 and retry base <= maximum")
         if result.ws_subscription not in ("logs", "newHeads"):
             raise ValueError("ROBINHOOD_WS_SUBSCRIPTION must be logs or newHeads")
+        if result.mode not in ("live", "backfill"):
+            raise ValueError("SCANNER_MODE must be live or backfill; hybrid is disabled")
+        if (env.get("BACKFILL_ENABLED") or "false").lower() != "false":
+            raise ValueError("Automatic backfill is disabled; use the explicit range CLI")
+        if result.mode == "live" and result.ws_subscription != "logs":
+            raise ValueError("Live mode requires filtered logs subscriptions")
+        if not result.confirmations <= result.live_overlap <= min(100, result.reorg_depth):
+            raise ValueError("Live overlap must cover confirmations and be <=100 and reorg depth")
+        if result.recovery_max < result.live_overlap or result.rpc_rps > 5:
+            raise ValueError("Recovery bound must cover overlap; free-tier HTTP rate must be <=5")
         return result

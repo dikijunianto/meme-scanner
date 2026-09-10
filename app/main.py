@@ -11,6 +11,9 @@ from app.config import Config
 from app.database import Database
 from app.heads import HeadFeed
 from app.rpc import RetriesExhausted, Rpc
+from app.telemetry import Telemetry
+from app.stock_assets import sync_assets
+from datetime import datetime, timezone
 
 
 def setup_logging(path):
@@ -23,8 +26,10 @@ def setup_logging(path):
     logging.getLogger("websockets").setLevel(logging.CRITICAL)
 
 
-async def main(max_batches=None):
+async def main(max_batches=None, backfill=None):
     config = Config.load()
+    if config.mode == "backfill" and backfill is None:
+        raise ValueError("Backfill requires python -m app.backfill with an explicit range")
     setup_logging(config.log_path)
     config.database.parent.mkdir(parents=True, exist_ok=True)
     lock = config.database.with_suffix(".lock").open("a")
@@ -35,20 +40,40 @@ async def main(max_batches=None):
         except BlockingIOError:
             lock.close()
             raise ValueError("Another watcher holds this database lock") from None
-    db, rpc = Database(config.database, config.chain_id), Rpc(config)
-    feed = HeadFeed(config) if config.rpc_ws else None
+    db = Database(config.database, config.chain_id)
+    db.migrate()
+    telemetry = Telemetry(db)
+    rpc = Rpc(config, telemetry)
+    feed = HeadFeed(config, telemetry) if config.rpc_ws and backfill is None else None
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
     if sys.platform != "win32":
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, task.cancel)
     try:
-        await Watcher(config, rpc, db, feed).run(max_batches)
+        watcher = Watcher(config, rpc, db, feed, cursor="live_checkpoint" if backfill is None else None,
+                          telemetry=telemetry)
+        if backfill is None:
+            await watcher.run(max_batches)
+        else:
+            await rpc.check_chain()
+            await watcher.pons.verify()
+            stamp = db.state("stock_assets_synced_at")
+            if stamp is None or (datetime.now(timezone.utc) - datetime.fromisoformat(stamp)).total_seconds() > 172800:
+                await sync_assets(config, db)
+            first, last = backfill
+            head = await rpc.head()
+            if last > head - config.confirmations:
+                raise ValueError("Backfill end must be confirmed and not in the future")
+            for start in range(first, last + 1, config.batch):
+                await watcher.process_range(start, min(last, start + config.batch - 1), head)
     finally:
         if feed and feed.task:
             feed.task.cancel()
             await asyncio.gather(feed.task, return_exceptions=True)
         await rpc.close()
+        if backfill is None:
+            telemetry.status("stopped")
         db.close()
         lock.close()
         logging.info("Scanner stopped")
