@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timezone
 
 from app.models import Block, utc_now
 
@@ -56,6 +57,31 @@ CREATE INDEX IF NOT EXISTS graduations_token ON graduations(token_address);
 CREATE INDEX IF NOT EXISTS graduations_pool ON graduations(pool_id);
 """
 
+PHASE2A_SCHEMA = """
+CREATE TABLE IF NOT EXISTS market_static (
+ key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS outcome_targets (
+ id INTEGER PRIMARY KEY, launch_id INTEGER NOT NULL REFERENCES launches(id), token_address TEXT NOT NULL,
+ target_age_seconds INTEGER NOT NULL, due_at TEXT NOT NULL, sampling_group TEXT NOT NULL,
+ sampling_probability TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+ last_attempt_at TEXT, completed_at TEXT, error_code TEXT, UNIQUE(launch_id,target_age_seconds)
+);
+CREATE INDEX IF NOT EXISTS outcome_targets_due ON outcome_targets(status,due_at);
+CREATE INDEX IF NOT EXISTS outcome_targets_token ON outcome_targets(token_address);
+CREATE TABLE IF NOT EXISTS market_snapshots (
+ id INTEGER PRIMARY KEY, launch_id INTEGER NOT NULL REFERENCES launches(id), token_address TEXT NOT NULL,
+ quote_asset_address TEXT NOT NULL, target_age_seconds INTEGER NOT NULL, observed_at TEXT NOT NULL,
+ age_seconds INTEGER NOT NULL, delay_seconds INTEGER NOT NULL, market_phase TEXT NOT NULL,
+ price_quote TEXT, fdv_quote TEXT, token_supply TEXT, quote_reserve TEXT, token_reserve TEXT,
+ curve_address TEXT, pool_id TEXT, v4_active_liquidity TEXT, liquidity_metric_type TEXT NOT NULL,
+ liquidity_quote_estimate TEXT, data_quality TEXT NOT NULL, source_method TEXT NOT NULL,
+ error_code TEXT, UNIQUE(launch_id,target_age_seconds)
+);
+CREATE INDEX IF NOT EXISTS market_snapshots_token ON market_snapshots(token_address,observed_at);
+CREATE INDEX IF NOT EXISTS market_snapshots_phase ON market_snapshots(market_phase);
+"""
+
 
 class Database:
     def __init__(self, path, chain_id):
@@ -90,6 +116,11 @@ class Database:
             if self.state("phase16_migrated_at") is None:
                 self.set_state("phase16_migrated_at", utc_now())
                 self.set_state("phase16_telemetry_started_at", utc_now())
+            for statement in PHASE2A_SCHEMA.split(";"):
+                if statement.strip():
+                    self.conn.execute(statement)
+            if self.state("phase2a_migrated_at") is None:
+                self.set_state("phase2a_migrated_at", utc_now())
 
     def state(self, key):
         row = self.conn.execute("SELECT value FROM chain_state WHERE key=?", (key,)).fetchone()
@@ -186,6 +217,67 @@ class Database:
             return
         with self.conn:
             self.record_coverage(kind, first, last)
+
+    def schedule_market_targets(self, launches, initial_rate, long_rate):
+        """Persist deterministic random cohorts; never choose from later outcomes."""
+        targets = (0, 300, 900, 3600, 21600, 86400)
+        with self.conn:
+            for launch in launches:
+                if not launch.get("is_stock_quote"):
+                    continue
+                row = self.conn.execute("SELECT id,block_timestamp FROM launches WHERE tx_hash=? AND log_index=?",
+                                        (launch["tx_hash"], launch["log_index"])).fetchone()
+                if not row:
+                    continue
+                launch_id, started = row
+                # Stable hash: long-horizon choice never depends on later market data.
+                marker = int(launch["token_address"].lower()[2:10], 16)
+                sampled = marker < int(initial_rate * 2**32)
+                long_sampled = marker < int(long_rate * 2**32)
+                if not sampled:
+                    self.conn.execute("INSERT INTO outcome_targets(launch_id,token_address,target_age_seconds,due_at,sampling_group,sampling_probability,status,completed_at,error_code) "
+                                      "VALUES(?,?,?,?,? ,?,'skipped',?,'not_sampled') ON CONFLICT(launch_id,target_age_seconds) DO NOTHING",
+                                      (launch_id, launch["token_address"], 0, started, "not_sampled", str(initial_rate), utc_now()))
+                    continue
+                for age in targets:
+                    group = "random_initial" if age <= 300 else "random_long"
+                    if age > 300 and not long_sampled:
+                        continue
+                    due = datetime.fromtimestamp(datetime.fromisoformat(started).timestamp() + age, timezone.utc).isoformat()
+                    self.conn.execute("INSERT INTO outcome_targets(launch_id,token_address,target_age_seconds,due_at,sampling_group,sampling_probability) "
+                                      "VALUES(?,?,?,?,?,?) ON CONFLICT(launch_id,target_age_seconds) DO NOTHING",
+                                      (launch_id, launch["token_address"], age, due, group, str(long_rate if age > 300 else initial_rate)))
+        return sampled, long_sampled
+
+    def stop_pending_market_targets(self):
+        with self.conn:
+            return self.conn.execute("UPDATE outcome_targets SET status='skipped',completed_at=?,error_code='sampling_policy' WHERE status='pending'", (utc_now(),)).rowcount
+
+    def due_market_targets(self, now, limit=2):
+        return [dict(row) for row in self.conn.execute("SELECT t.*,l.quote_asset_address,l.curve_address,l.block_timestamp "
+            "FROM outcome_targets t JOIN launches l ON l.id=t.launch_id WHERE t.status='pending' AND t.due_at<=? "
+            "ORDER BY t.due_at LIMIT ?", (now, limit))]
+
+    def market_static(self, key):
+        row = self.conn.execute("SELECT value FROM market_static WHERE key=?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_market_static(self, key, value):
+        with self.conn:
+            self.conn.execute("INSERT INTO market_static VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", (key, str(value), utc_now()))
+
+    def market_calls(self, since):
+        return self.conn.execute("SELECT COALESCE(sum(count),0) FROM rpc_usage WHERE metric='market_rpc_calls' AND minute>=?", (since,)).fetchone()[0]
+
+    def finish_market_target(self, target, snapshot=None, error=None, permanent=False):
+        with self.conn:
+            if snapshot:
+                fields = ",".join(snapshot)
+                self.conn.execute(f"INSERT INTO market_snapshots({fields}) VALUES({','.join('?' for _ in snapshot)}) "
+                                  "ON CONFLICT(launch_id,target_age_seconds) DO NOTHING", tuple(snapshot.values()))
+            status = "completed" if snapshot else ("unavailable" if permanent else "pending")
+            self.conn.execute("UPDATE outcome_targets SET status=?,attempts=attempts+1,last_attempt_at=?,completed_at=?,error_code=? WHERE id=?",
+                              (status, utc_now(), utc_now() if snapshot or permanent else None, error, target["id"]))
 
     def rollback_to(self, number, cursor="last_processed_block"):
         with self.conn:

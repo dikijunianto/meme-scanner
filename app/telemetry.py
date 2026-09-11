@@ -11,6 +11,10 @@ METRICS |= {"ws_events_processed", "ws_launch_events", "ws_graduation_events",
             "block_header_cache_hits", "block_header_cache_misses", "quote_registry_hits",
             "quote_registry_misses", "skipped_nonstock_metadata_calls",
             "intentional_gap_count", "intentional_gap_blocks"}
+METRICS |= {"market_snapshot_curve", "market_snapshot_v4", "market_static_cache_fill",
+            "market_retry", "market_target_due", "market_targets_completed",
+            "market_targets_skipped_budget", "market_targets_failed", "market_targets_partial",
+            "market_long_horizon_sampled", "market_long_horizon_not_sampled", "market_rpc_calls"}
 
 
 class Telemetry:

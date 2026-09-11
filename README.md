@@ -1,4 +1,4 @@
-# meme-scanner — Phase 1.6
+# meme-scanner — Phase 2A
 
 Read-only Pons V2 launch collection on Robinhood Chain mainnet (4663), Python 3.12,
 SQLite WAL, private provider HTTP and filtered WebSocket logs. No wallet, private keys,
@@ -193,7 +193,30 @@ overlap, orphan cleanup, deep-fork stop, read-only RPC validation, response ID v
 bounded jitter/backoff, shrinking log ranges, and disconnect recovery. Live deployment evidence and remaining limitations
 are recorded in `docs/phase1-report.md`.
 
-Phase 2 is not implemented. Phase 1.6 adds WS-first low-cost monitoring, while preserving verified graduation identity and live-first
-coverage, not FDV, liquidity, prices, volume, scoring, signals, or trading.
+Phase 2B is not implemented. Phase 2A adds market-state collection only: no scoring,
+signals, wallets, swaps, signing, or trading.
 Deployment/backup evidence and rollback instructions: [Phase 1.5 report](docs/phase15-report.md)
 and [Phase 1.6 report](docs/phase16-report.md).
+
+## Phase 2A market outcomes
+
+Phase 2A adds read-only snapshots for a deterministic 10% random cohort of new
+stock-paired launches: T+0, T+5m, then T+15m/T+1h/T+6h/T+24h for its 5% long cohort.
+Sampling uses the token-address hash fixed at launch, so it cannot select winners later.
+The worker has a 14,000 contract-call/day and 20-call/minute local guard; exhaustion
+pauses market work only. Launch ingestion continues.
+
+Curve `price_quote` is marginal spot price: normalized `getReserves().quoteReserve /
+getReserves().tokenReserve`. It includes Pons's virtual phantom quote reserve. `fdv_quote`
+is that price times ERC-20 `totalSupply`. `liquidity_quote_estimate` is normalized
+`realQuoteReserve`, the physical quote reserve excluding virtual liquidity and pending
+fees; it is explicitly one-sided quote liquidity. V4 price uses verified `PoolId`,
+PoolManager `extsload`, and `sqrtPriceX96² / 2¹⁹²`, adjusted for currency ordering and
+decimals. V4 active liquidity is protocol-native raw liquidity, never quote/USD liquidity.
+No USD conversion is stored.
+
+```sh
+.venv/bin/python scripts/market_usage_report.py --hours 24
+.venv/bin/python scripts/outcome_report.py --days 7 --min-completeness 0.5
+.venv/bin/python scripts/inspect_market_history.py TOKEN_ADDRESS
+```

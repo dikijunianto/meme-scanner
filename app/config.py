@@ -40,6 +40,12 @@ class Config:
     transport_mode: str = "http_complete"
     startup_recovery_max: int = 500
     head_healthcheck: float = 60
+    market_enabled: bool = False
+    market_poll: float = 10
+    market_daily_calls: int = 14000
+    market_minute_calls: int = 20
+    market_long_sample: float = 0.05
+    market_initial_sample: float = 0.10
 
     @classmethod
     def load(cls):
@@ -101,7 +107,13 @@ class Config:
                      number("LIVE_MAX_RECOVERY_BLOCKS", env.get("LIVE_RECOVERY_MAX_BLOCKS") or 1000, True, 1),
                      env.get("LIVE_TRANSPORT_MODE") or "ws_first",
                      number("LIVE_MAX_STARTUP_RECOVERY_BLOCKS", 500, True, 1),
-                     number("HEAD_HEALTHCHECK_SECONDS", 60, minimum=60))
+                     number("HEAD_HEALTHCHECK_SECONDS", 60, minimum=60),
+                     (env.get("MARKET_TRACKING_ENABLED") or "false").lower() == "true",
+                     number("MARKET_POLL_SECONDS", 10, minimum=1),
+                     number("MARKET_MAX_CALLS_PER_DAY", 14000, True, 1),
+                     number("MARKET_MAX_CALLS_PER_MINUTE", 20, True, 1),
+                     number("MARKET_LONG_HORIZON_SAMPLE_RATE", 0.05, minimum=0),
+                     number("MARKET_INITIAL_SAMPLE_RATE", 0.10, minimum=0))
         if result.batch > 500 or result.retention <= max(result.reorg_depth, result.overlap):
             raise ValueError("Batch must be <=500; retention must exceed overlap and reorg depth")
         if result.start_block is not None and result.start_block < 0:
@@ -120,6 +132,8 @@ class Config:
             raise ValueError("Live overlap must cover confirmations and be <=100 and reorg depth")
         if result.transport_mode not in ("ws_first", "http_complete"):
             raise ValueError("LIVE_TRANSPORT_MODE must be ws_first or http_complete")
+        if result.market_long_sample > result.market_initial_sample or result.market_initial_sample > 1:
+            raise ValueError("Market sample rates must satisfy 0<=long<=initial<=1")
         if result.recovery_max < result.live_overlap or result.startup_recovery_max < result.live_overlap or result.rpc_rps > 5:
             raise ValueError("Recovery bound must cover overlap; free-tier HTTP rate must be <=5")
         return result

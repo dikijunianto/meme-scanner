@@ -13,6 +13,7 @@ from app.heads import HeadFeed
 from app.rpc import RetriesExhausted, Rpc
 from app.telemetry import Telemetry
 from app.stock_assets import sync_assets
+from app.market import MarketWorker
 from datetime import datetime, timezone
 
 
@@ -50,6 +51,7 @@ async def main(max_batches=None, backfill=None):
     if sys.platform != "win32":
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, task.cancel)
+    market_task = asyncio.create_task(MarketWorker(config, rpc, db, telemetry).run()) if config.market_enabled else None
     try:
         watcher = Watcher(config, rpc, db, feed, cursor="live_checkpoint" if backfill is None else None,
                           telemetry=telemetry)
@@ -68,6 +70,9 @@ async def main(max_batches=None, backfill=None):
             for start in range(first, last + 1, config.batch):
                 await watcher.process_range(start, min(last, start + config.batch - 1), head)
     finally:
+        if market_task:
+            market_task.cancel()
+            await asyncio.gather(market_task, return_exceptions=True)
         if feed and feed.task:
             feed.task.cancel()
             await asyncio.gather(feed.task, return_exceptions=True)

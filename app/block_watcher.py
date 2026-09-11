@@ -183,6 +183,12 @@ class Watcher:
         if self.telemetry:
             self.telemetry.add("launches_received", new_launches)
             self.telemetry.add("stock_paired_launches", stock)
+        if self.config.market_enabled:
+            for launch in launches:
+                if launch.get("is_stock_quote"):
+                    sampled, long_sampled = self.db.schedule_market_targets([launch], self.config.market_initial_sample,
+                                                                               self.config.market_long_sample)
+                    self.telemetry.add("market_long_horizon_sampled" if long_sampled else "market_long_horizon_not_sampled")
         log.info("WebSocket event block=%d launches=%d graduations=%d", block.number,
                  len(launches), len(graduations))
 
