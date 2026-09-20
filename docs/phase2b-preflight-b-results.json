@@ -1,0 +1,318 @@
+{
+  "label": "OFFLINE REVALIDATION OF RECORDED CHAIN EVIDENCE",
+  "deployment_source_equivalence": "STRONGLY_SUPPORTED",
+  "curve_buy_behavior": "VERIFIED",
+  "curve_sell_behavior": "VERIFIED",
+  "price_metric": "VALID_MARGINAL_PRICE",
+  "curve_event_semantics": "VERIFIED",
+  "v4_swap_semantics": "VERIFIED",
+  "actor_identity": "VERIFIED explicit caller/recipient/swap_sender; economic_actor UNKNOWN",
+  "fixtures": {
+    "curve": {
+      "curve_buy_1": {
+        "event": {
+          "direction": "buy",
+          "caller": "0x65050a9b7e5075a2ba5ced7b1b64ee66262c40dc",
+          "recipient": "0x65050a9b7e5075a2ba5ced7b1b64ee66262c40dc",
+          "token_amount": 3296809756308763738142818,
+          "quote_amount": 2585853923805003595,
+          "base_fee_quote": 25858539238050035,
+          "creator_tax_quote": 0,
+          "economic_actor": null
+        },
+        "model": {
+          "gross_quote": 2585853923805003595,
+          "net_quote": 2559995384566953560,
+          "fee": 25858539238050035,
+          "tax": 0,
+          "output": 3296809756308763738142818
+        },
+        "integer_deltas": {
+          "output": 0,
+          "fee": 0,
+          "tax": 0
+        },
+        "transfers_match": true,
+        "verified": true
+      },
+      "curve_buy_2": {
+        "event": {
+          "direction": "buy",
+          "caller": "0x9689992f5b5c09447f15906d8d11214944488341",
+          "recipient": "0x666bf9a4e5086204be436ab37111ae20b821f3c8",
+          "token_amount": 2728103349089954182663503,
+          "quote_amount": 889420330087059247,
+          "base_fee_quote": 8894203300870592,
+          "creator_tax_quote": 0,
+          "economic_actor": null
+        },
+        "model": {
+          "gross_quote": 889420330087059247,
+          "net_quote": 880526126786188655,
+          "fee": 8894203300870592,
+          "tax": 0,
+          "output": 2728103349089954182663503
+        },
+        "integer_deltas": {
+          "output": 0,
+          "fee": 0,
+          "tax": 0
+        },
+        "transfers_match": true,
+        "verified": true
+      },
+      "curve_buy_3": {
+        "event": {
+          "direction": "buy",
+          "caller": "0xb3ea566ce79eaf79b3448c3d5ec1c9449cb82832",
+          "recipient": "0x80fb8998b12f3e018abcd9cf3705cc4f9c7eaaed",
+          "token_amount": 18386032141107065589603,
+          "quote_amount": 516187228076628,
+          "base_fee_quote": 5161872280766,
+          "creator_tax_quote": 5161872280766,
+          "economic_actor": null
+        },
+        "model": {
+          "gross_quote": 516187228076628,
+          "net_quote": 505863483515096,
+          "fee": 5161872280766,
+          "tax": 5161872280766,
+          "output": 18386032141107065589603
+        },
+        "integer_deltas": {
+          "output": 0,
+          "fee": 0,
+          "tax": 0
+        },
+        "transfers_match": true,
+        "verified": true
+      },
+      "curve_sell_1": {
+        "event": {
+          "direction": "sell",
+          "caller": "0x65050a9b7e5075a2ba5ced7b1b64ee66262c40dc",
+          "recipient": "0x65050a9b7e5075a2ba5ced7b1b64ee66262c40dc",
+          "token_amount": 1680187208174982092126476,
+          "quote_amount": 326561360835800414,
+          "base_fee_quote": 3332258784038779,
+          "creator_tax_quote": 3332258784038779,
+          "economic_actor": null
+        },
+        "model": {
+          "gross_quote": 333225878403877972,
+          "net_quote": 326561360835800414,
+          "fee": 3332258784038779,
+          "tax": 3332258784038779,
+          "output": 326561360835800414
+        },
+        "integer_deltas": {
+          "output": 0,
+          "fee": 0,
+          "tax": 0
+        },
+        "transfers_match": true,
+        "verified": true
+      },
+      "curve_sell_2": {
+        "event": {
+          "direction": "sell",
+          "caller": "0x65050a9b7e5075a2ba5ced7b1b64ee66262c40dc",
+          "recipient": "0x65050a9b7e5075a2ba5ced7b1b64ee66262c40dc",
+          "token_amount": 3482160886389875213409110,
+          "quote_amount": 598398402430000990,
+          "base_fee_quote": 6044428307373747,
+          "creator_tax_quote": 0,
+          "economic_actor": null
+        },
+        "model": {
+          "gross_quote": 604442830737374737,
+          "net_quote": 598398402430000990,
+          "fee": 6044428307373747,
+          "tax": 0,
+          "output": 598398402430000990
+        },
+        "integer_deltas": {
+          "output": 0,
+          "fee": 0,
+          "tax": 0
+        },
+        "transfers_match": true,
+        "verified": true
+      },
+      "curve_sell_3": {
+        "event": {
+          "direction": "sell",
+          "caller": "0x65050a9b7e5075a2ba5ced7b1b64ee66262c40dc",
+          "recipient": "0x65050a9b7e5075a2ba5ced7b1b64ee66262c40dc",
+          "token_amount": 3584281505535708278959569,
+          "quote_amount": 681139010822228282,
+          "base_fee_quote": 6880192028507356,
+          "creator_tax_quote": 0,
+          "economic_actor": null
+        },
+        "model": {
+          "gross_quote": 688019202850735638,
+          "net_quote": 681139010822228282,
+          "fee": 6880192028507356,
+          "tax": 0,
+          "output": 681139010822228282
+        },
+        "integer_deltas": {
+          "output": 0,
+          "fee": 0,
+          "tax": 0
+        },
+        "transfers_match": true,
+        "verified": true
+      }
+    },
+    "boundary_buys": [
+      {
+        "refund": 19579463263945370,
+        "integer_deltas": {
+          "output": 0,
+          "spent": 0,
+          "fee": 0,
+          "tax": 0
+        },
+        "verified": true
+      },
+      {
+        "refund": 1937924178532952798,
+        "integer_deltas": {
+          "output": 0,
+          "spent": 0,
+          "fee": 0,
+          "tax": 0
+        },
+        "verified": true
+      }
+    ],
+    "v4": {
+      "v4_buy": {
+        "direction": "buy",
+        "amount0": 7400981952089628265365696,
+        "amount1": -1565384536351890432,
+        "sqrtPriceX96": 37116462060999209304140609,
+        "liquidity": 92140088551983424648313,
+        "tick": -153329,
+        "fee": 0,
+        "swap_sender": "0x8876789976decbfcbbbe364623c63652db8c0904",
+        "economic_actor": null,
+        "amount_scope": "pool_swap_before_afterSwap_hook",
+        "pool_transfer_deltas": {
+          "0x6e2b582fbeb61ae3eada57f6f09453a5968a4a31": 7400981952089628265365696,
+          "0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec": -1565384536351890432
+        },
+        "hook_fees": [
+          {
+            "currency": "0x6e2b582fbeb61ae3eada57f6f09453a5968a4a31",
+            "base_fee": 74009819520896282653656,
+            "creator_tax": 74009819520896282653656
+          }
+        ],
+        "verified": true
+      },
+      "v4_sell": {
+        "direction": "sell",
+        "amount0": -5818386788367178033566657,
+        "amount1": 1153143725475528489,
+        "sqrtPriceX96": 34778891061095423125600374,
+        "liquidity": 92140088551983424756527,
+        "tick": -154630,
+        "fee": 0,
+        "swap_sender": "0xf1b4f5eed918327150310c37cb6c2b85739c5726",
+        "economic_actor": null,
+        "amount_scope": "pool_swap_before_afterSwap_hook",
+        "pool_transfer_deltas": {
+          "0x9fe1375ba36569a27bf4b3dce2b8d8c8fafa192b": -5818386788367178033566657,
+          "0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec": 1153143725475528489
+        },
+        "hook_fees": [
+          {
+            "currency": "0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec",
+            "base_fee": 11531437254755284,
+            "creator_tax": 0
+          }
+        ],
+        "verified": true
+      }
+    },
+    "tiny_simulations": [
+      {
+        "curve": "0x8CCDe7473d50FA7A99dd9A39dB876B95909Da8C7",
+        "checks": [
+          {
+            "direction": "buy",
+            "status": "success",
+            "integer_delta": 0,
+            "marginal_price": "1.30240515522018861453442299932913147962399821580277400968105964408329427290221E-7",
+            "effective_price": "1.31556206525382659214177753547068052201333339088159642362335209254297799692003E-7",
+            "fee_adjusted_relative_difference": "9.8999999696231178464628576537506667129525856054206130085428146738068789E-7"
+          },
+          {
+            "direction": "sell",
+            "status": "success",
+            "integer_delta": 0,
+            "marginal_price": "1.30240515522018861453442299932913147962399821580277400968105964408329427290221E-7",
+            "effective_price": "1.28937981428815943518966126686594829720877289063990426420582145879143063785780E-7",
+            "fee_adjusted_relative_difference": "-9.99999010087255288680903564397251038813885386261405619989091871523732069E-7"
+          }
+        ]
+      },
+      {
+        "curve": "0x14FFbb0cCCCCDD5BE9d2C6C1FD06DAf8EbCc50f9",
+        "checks": [
+          {
+            "direction": "buy",
+            "status": "success",
+            "integer_delta": 0,
+            "marginal_price": "2.02831580565685895507170248260850657928677610669009887225095260088074472193751E-8",
+            "effective_price": "2.06971203408798885763093422326654099000141804591979991588330529380489681729710E-8",
+            "fee_adjusted_relative_difference": "9.7999994112439747801447074088291902159725776266711052371597487368163985E-7"
+          },
+          {
+            "signature": "sell(uint256,uint256,address)",
+            "status": "ContractCallError"
+          }
+        ]
+      },
+      {
+        "curve": "0x6EEb1d7d879DC399d4A3E7C18E3538FF62c53F43",
+        "checks": [
+          {
+            "signature": "buy(uint256,uint256,address)",
+            "status": "ContractCallError"
+          },
+          {
+            "direction": "sell",
+            "status": "success",
+            "integer_delta": 0,
+            "marginal_price": "2.08711643823281292945331934988443118449650744059236070306886377234204337570656E-7",
+            "effective_price": "2.06624320760728543042937576787491951616057413335639819909432782575411028409441E-7",
+            "fee_adjusted_relative_difference": "-9.99998996014276889820292691170020873344597390337965508049957854370988258E-7"
+          }
+        ]
+      }
+    ]
+  },
+  "rpc_usage": {
+    "eth_getLogs": 106,
+    "http": 292,
+    "eth_getTransactionByHash": 57,
+    "eth_getTransactionReceipt": 15,
+    "eth_call": 91,
+    "eth_getCode": 6,
+    "eth_chainId": 1,
+    "eth_getBlockByNumber": 16
+  },
+  "gate": "READY",
+  "unresolved": [],
+  "nonblocking_limitations": [
+    "Exact V2 compiler settings/build artifacts unavailable; no exact source-bytecode match claimed.",
+    "Simulations use existing historical active-curve state, not current head; four succeeded and two reverted.",
+    "Economic actor remains unknown when only intermediary caller/recipient/swap_sender is observed.",
+    "V4 event deltas precede afterSwap hook fees; they are not final user transfers.",
+    "Scope: sampled runtime family and ordinary unclamped curve trades; no universal protocol equivalence claim."
+  ]
+}

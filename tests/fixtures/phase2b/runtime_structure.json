@@ -1,0 +1,50 @@
+[
+  {
+    "index": 3,
+    "runtime_bytes": 10229,
+    "metadata_suffix": "a2646970667358221220e96b30c1852a1d0fb726a607894af92ab1cce71f676a967229cfaed5e9b6a73564736f6c63430008230033",
+    "opcode_skeleton_sha256": "f1851aa499ef19e4e6a993acc5be2957f5984205b5cf32408edd4f21ae28e27b",
+    "delegatecall_opcode_count": 0,
+    "note": "PUSH operands omitted for structural comparison only; NOT bytecode equivalence or immutable normalization"
+  },
+  {
+    "index": 7,
+    "runtime_bytes": 10229,
+    "metadata_suffix": "a2646970667358221220e96b30c1852a1d0fb726a607894af92ab1cce71f676a967229cfaed5e9b6a73564736f6c63430008230033",
+    "opcode_skeleton_sha256": "f1851aa499ef19e4e6a993acc5be2957f5984205b5cf32408edd4f21ae28e27b",
+    "delegatecall_opcode_count": 0,
+    "note": "PUSH operands omitted for structural comparison only; NOT bytecode equivalence or immutable normalization"
+  },
+  {
+    "index": 15,
+    "runtime_bytes": 10229,
+    "metadata_suffix": "a2646970667358221220e96b30c1852a1d0fb726a607894af92ab1cce71f676a967229cfaed5e9b6a73564736f6c63430008230033",
+    "opcode_skeleton_sha256": "f1851aa499ef19e4e6a993acc5be2957f5984205b5cf32408edd4f21ae28e27b",
+    "delegatecall_opcode_count": 0,
+    "note": "PUSH operands omitted for structural comparison only; NOT bytecode equivalence or immutable normalization"
+  },
+  {
+    "index": 0,
+    "runtime_bytes": 10229,
+    "metadata_suffix": "a2646970667358221220e96b30c1852a1d0fb726a607894af92ab1cce71f676a967229cfaed5e9b6a73564736f6c63430008230033",
+    "opcode_skeleton_sha256": "f1851aa499ef19e4e6a993acc5be2957f5984205b5cf32408edd4f21ae28e27b",
+    "delegatecall_opcode_count": 0,
+    "note": "PUSH operands omitted for structural comparison only; NOT bytecode equivalence or immutable normalization"
+  },
+  {
+    "index": 10,
+    "runtime_bytes": 10229,
+    "metadata_suffix": "a2646970667358221220e96b30c1852a1d0fb726a607894af92ab1cce71f676a967229cfaed5e9b6a73564736f6c63430008230033",
+    "opcode_skeleton_sha256": "f1851aa499ef19e4e6a993acc5be2957f5984205b5cf32408edd4f21ae28e27b",
+    "delegatecall_opcode_count": 0,
+    "note": "PUSH operands omitted for structural comparison only; NOT bytecode equivalence or immutable normalization"
+  },
+  {
+    "index": 12,
+    "runtime_bytes": 10229,
+    "metadata_suffix": "a2646970667358221220e96b30c1852a1d0fb726a607894af92ab1cce71f676a967229cfaed5e9b6a73564736f6c63430008230033",
+    "opcode_skeleton_sha256": "f1851aa499ef19e4e6a993acc5be2957f5984205b5cf32408edd4f21ae28e27b",
+    "delegatecall_opcode_count": 0,
+    "note": "PUSH operands omitted for structural comparison only; NOT bytecode equivalence or immutable normalization"
+  }
+]

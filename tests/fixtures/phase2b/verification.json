@@ -1,0 +1,24 @@
+{
+  "chain_id": 4663,
+  "deployment_source_equivalence": "STRONGLY_SUPPORTED",
+  "source_commit": "162310fbd1217717e2f5e4cde794d6a11322b469",
+  "uniswap_source_commit": "46c6834698c48bc4a463a86d8420f4eb1d7f3b75",
+  "rpc_usage": {
+    "eth_getLogs": 106,
+    "http": 292,
+    "eth_getTransactionByHash": 57,
+    "eth_getTransactionReceipt": 15,
+    "eth_call": 91,
+    "eth_getCode": 6,
+    "eth_chainId": 1,
+    "eth_getBlockByNumber": 16
+  },
+  "unresolved": [],
+  "nonblocking_limitations": [
+    "Exact V2 compiler settings/build artifacts unavailable; no exact source-bytecode match claimed.",
+    "Simulations use existing historical active-curve state, not current head; four succeeded and two reverted.",
+    "Economic actor remains unknown when only intermediary caller/recipient/swap_sender is observed.",
+    "V4 event deltas precede afterSwap hook fees; they are not final user transfers.",
+    "Scope: sampled runtime family and ordinary unclamped curve trades; no universal protocol equivalence claim."
+  ]
+}

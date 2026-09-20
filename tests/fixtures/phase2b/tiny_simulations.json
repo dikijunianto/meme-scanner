@@ -1,0 +1,245 @@
+[
+  {
+    "launch": {
+      "id": 2452,
+      "tx_hash": "0x8318cf874a70aa78c5b70002703969395354ab4d3d707c231a2b2bd03fc3ad30",
+      "log_index": 24,
+      "block_number": 67325663,
+      "block_timestamp": "2026-09-19T19:16:26+00:00",
+      "factory_address": "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e",
+      "token_address": "0xe71Eb7D4BA73ee27Bb1c262c0a7594aE67594862",
+      "quote_asset_address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "curve_address": "0x8CCDe7473d50FA7A99dd9A39dB876B95909Da8C7",
+      "creator_address": "0x5c4dAA2230dB80b736947DA040F3f006Ef14C81D",
+      "pool_id": "0x9a883e996b0e89e5b3e42a6e9c353b8dacfe0e994144e96c2dcc0d3a10c93440",
+      "pool_manager_address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "currency0": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "currency1": "0xe71Eb7D4BA73ee27Bb1c262c0a7594aE67594862",
+      "fee": 0,
+      "tick_spacing": 200,
+      "hooks": "0xE5e702641Ea86F4ae6cC3cDaeD2B886f976Be044",
+      "position_id": "2974000",
+      "token_amount": "204081632653061224603330342",
+      "quote_amount": "41600000000000000081",
+      "raw_event_name": "PoolGraduated",
+      "detected_at": "2026-09-19T19:16:26+00:00",
+      "launch_block": 67324746
+    },
+    "transaction": {
+      "blockHash": "0x9d96f257e27df290d259aab990e8f6d3e1df5aa5645d5a77784f071980b4725d",
+      "blockNumber": "0x4034e7c",
+      "from": "0x53e68553ca08f512423628d64c01b0a14dfcda99",
+      "gas": "0x7a120",
+      "gasPrice": "0x5358608",
+      "hash": "0x730c3ecb4451864bdf0855d282750e1422ddbac3dec6fa617f98a6cf14341748",
+      "input": "0xd04c698300000000000000000000000000000000000000000005f2fda12b31235d5b5cd80000000000000000000000000000000000000000000000000b21b7cc4f78d60000000000000000000000000053e68553ca08f512423628d64c01b0a14dfcda99",
+      "nonce": "0x50ee2",
+      "to": "0x8ccde7473d50fa7a99dd9a39db876b95909da8c7",
+      "transactionIndex": "0x3",
+      "value": "0x0",
+      "type": "0x0",
+      "chainId": "0x1237",
+      "v": "0x2492",
+      "r": "0x28a89a2ce73725141f9d880f4d7178709b728dcdc24b62320d38f7c1ec5c7aeb",
+      "s": "0x770d4a92ce68962c961a1f7ac1c4d041603c2fc4efca6fa8a7198470af034314"
+    },
+    "block": "0x4034e7b",
+    "state": {
+      "getReserves()": "0x000000000000000000000000000000000000000000000002860e41d379e13d8f00000000000000000000000000000000000000000127aaf195437261a41088e6",
+      "feeBps()": "0x0000000000000000000000000000000000000000000000000000000000000064",
+      "creatorTaxBps()": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "token_decimals": "0x0000000000000000000000000000000000000000000000000000000000000012",
+      "quote_decimals": "0x0000000000000000000000000000000000000000000000000000000000000012"
+    },
+    "simulations": [
+      {
+        "signature": "buy(uint256,uint256,address)",
+        "amount": "46553218774714",
+        "call": {
+          "from": "0x53e68553ca08f512423628d64c01b0a14dfcda99",
+          "to": "0x8CCDe7473d50FA7A99dd9A39dB876B95909Da8C7",
+          "value": "0x0",
+          "data": "0x59a87bc100000000000000000000000000000000000000000000000000002a57041176ba000000000000000000000000000000000000000000000000000000000000000100000000000000000000000053e68553ca08f512423628d64c01b0a14dfcda99"
+        },
+        "result": "0x0000000000000000000000000000000000000000000000132edf3bd3e11b874b",
+        "status": "success"
+      },
+      {
+        "signature": "sell(uint256,uint256,address)",
+        "amount": "357440375509291309007",
+        "call": {
+          "from": "0x53e68553ca08f512423628d64c01b0a14dfcda99",
+          "to": "0x8CCDe7473d50FA7A99dd9A39dB876B95909Da8C7",
+          "value": "0x0",
+          "data": "0xd04c6983000000000000000000000000000000000000000000000013607b4fb9b58b17cf000000000000000000000000000000000000000000000000000000000000000100000000000000000000000053e68553ca08f512423628d64c01b0a14dfcda99"
+        },
+        "result": "0x000000000000000000000000000000000000000000000000000029ea9d70c47e",
+        "status": "success"
+      }
+    ]
+  },
+  {
+    "launch": {
+      "id": 2488,
+      "tx_hash": "0x6a3da8c05d39babbfde563a5f8d80200263297b788bd45aaf79162df02735b8c",
+      "log_index": 48,
+      "block_number": 67561360,
+      "block_timestamp": "2026-09-20T01:52:05+00:00",
+      "factory_address": "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e",
+      "token_address": "0x6e2B582FbEB61AE3EadA57f6f09453a5968a4A31",
+      "quote_asset_address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "curve_address": "0x14FFbb0cCCCCDD5BE9d2C6C1FD06DAf8EbCc50f9",
+      "creator_address": "0x88cEBe73bd04ea7c36491d14Ee282f5713498DC2",
+      "pool_id": "0x57b463b46ee4f331fe53c82e9dd144a7a9123e09cab50c7dbf49fef75be63dd5",
+      "pool_manager_address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "currency0": "0x6e2B582FbEB61AE3EadA57f6f09453a5968a4A31",
+      "currency1": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "fee": 0,
+      "tick_spacing": 200,
+      "hooks": "0xE5e702641Ea86F4ae6cC3cDaeD2B886f976Be044",
+      "position_id": "2984215",
+      "token_amount": "204081632653061224538854002",
+      "quote_amount": "41600000000000000035",
+      "raw_event_name": "PoolGraduated",
+      "detected_at": "2026-09-20T01:52:05+00:00",
+      "launch_block": 67550494
+    },
+    "transaction": {
+      "blockHash": "0x75a6395c41e1a1c6c2d60bcf24970a5204a6195c0d58bf86363d19b5e0f287a5",
+      "blockNumber": "0x406bd24",
+      "from": "0xe444b2d02782cae31282ad90a60111fc96a87115",
+      "gas": "0xc3500",
+      "gasPrice": "0x3ff48f0",
+      "maxFeePerGas": "0x7d84d00",
+      "maxPriorityFeePerGas": "0x0",
+      "hash": "0x4252c7f68fae5572ffaaa5da7cd468955de5ac25e4707a11a6ab94c0b522988e",
+      "input": "0x59a87bc1000000000000000000000000000000000000000000000000068a3e6dc1660f920000000000000000000000000000000000000000000bcda841bcef40e5305b4b000000000000000000000000e444b2d02782cae31282ad90a60111fc96a87115",
+      "nonce": "0x2",
+      "to": "0x14ffbb0cccccdd5be9d2c6c1fd06daf8ebcc50f9",
+      "transactionIndex": "0x2",
+      "value": "0x0",
+      "type": "0x2",
+      "accessList": [],
+      "chainId": "0x1237",
+      "v": "0x1",
+      "r": "0x4bd1e8b9366e4e76c6243d61dd75953678e2f790f1446018008497e5a653dd9a",
+      "s": "0x59716ac9dbdf8b5bfd0b8b23225e0c16d281d967ecf4d360aa8c163a5a8cf407",
+      "yParity": "0x1"
+    },
+    "block": "0x406bd23",
+    "state": {
+      "getReserves()": "0x000000000000000000000000000000000000000000000000fef4a76c776d7bd4000000000000000000000000000000000000000002ed3841e65d4747ac33fe5b",
+      "feeBps()": "0x0000000000000000000000000000000000000000000000000000000000000064",
+      "creatorTaxBps()": "0x0000000000000000000000000000000000000000000000000000000000000064",
+      "token_decimals": "0x0000000000000000000000000000000000000000000000000000000000000012",
+      "quote_decimals": "0x0000000000000000000000000000000000000000000000000000000000000012"
+    },
+    "simulations": [
+      {
+        "signature": "buy(uint256,uint256,address)",
+        "amount": "18371492864253",
+        "call": {
+          "from": "0xe444b2d02782cae31282ad90a60111fc96a87115",
+          "to": "0x14FFbb0cCCCCDD5BE9d2C6C1FD06DAf8EbCc50f9",
+          "value": "0x0",
+          "data": "0x59a87bc1000000000000000000000000000000000000000000000000000010b5724e60fd0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000e444b2d02782cae31282ad90a60111fc96a87115"
+        },
+        "result": "0x0000000000000000000000000000000000000000000000301e69c52cfc9779fb",
+        "status": "success"
+      },
+      {
+        "signature": "sell(uint256,uint256,address)",
+        "amount": "905751107052264917822",
+        "call": {
+          "from": "0xe444b2d02782cae31282ad90a60111fc96a87115",
+          "to": "0x14FFbb0cCCCCDD5BE9d2C6C1FD06DAf8EbCc50f9",
+          "value": "0x0",
+          "data": "0xd04c698300000000000000000000000000000000000000000000003119d258fd2f0e8b3e0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000e444b2d02782cae31282ad90a60111fc96a87115"
+        },
+        "status": "ContractCallError"
+      }
+    ]
+  },
+  {
+    "launch": {
+      "id": 2486,
+      "tx_hash": "0xcf2377082a7d9d6204e73f9bbb9f6e4b8de0a82c16aeac40df5379c807781aa1",
+      "log_index": 80,
+      "block_number": 67537204,
+      "block_timestamp": "2026-09-20T01:11:22+00:00",
+      "factory_address": "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e",
+      "token_address": "0xc4086d9CE6abF5F22499A5c2D7F411e53b8839EB",
+      "quote_asset_address": "0x411eFb0E7f985935DAec3D4C3ebaEa0d0AD7D89f",
+      "curve_address": "0x6EEb1d7d879DC399d4A3E7C18E3538FF62c53F43",
+      "creator_address": "0x8ec87681B3410d2d0bF7c75B30Ec2E1D17B6A1eE",
+      "pool_id": "0x83deddffd58425013110a15a8b250511caaf0d02c877d224ef84fa18b56f8f80",
+      "pool_manager_address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "currency0": "0x411eFb0E7f985935DAec3D4C3ebaEa0d0AD7D89f",
+      "currency1": "0xc4086d9CE6abF5F22499A5c2D7F411e53b8839EB",
+      "fee": 0,
+      "tick_spacing": 200,
+      "hooks": "0xE5e702641Ea86F4ae6cC3cDaeD2B886f976Be044",
+      "position_id": "2983247",
+      "token_amount": "204081632653061224506752449",
+      "quote_amount": "172796487119437943214",
+      "raw_event_name": "PoolGraduated",
+      "detected_at": "2026-09-20T01:11:22+00:00",
+      "launch_block": 67488273
+    },
+    "transaction": {
+      "blockHash": "0x7e1e39e2d1c5bcf7cfdcc383364937f48eb64f56b22e05aa146303685c85b889",
+      "blockNumber": "0x405ca2b",
+      "from": "0x2fd2161a01207785315e5419ad72c918b8e123cd",
+      "gas": "0x493e0",
+      "gasPrice": "0x4124450",
+      "maxFeePerGas": "0xcfc47a0",
+      "maxPriorityFeePerGas": "0x0",
+      "hash": "0x1ca9cd82fb26f66e8f13adf7e14663acb1566d80656f43bc17156cd9d6002870",
+      "input": "0xd04c6983000000000000000000000000000000000000000000215684565877f33bc0d0450000000000000000000000000000000000000000000000000108701eac6b8c800000000000000000000000002fd2161a01207785315e5419ad72c918b8e123cd",
+      "nonce": "0xa4d",
+      "to": "0x6eeb1d7d879dc399d4a3e7c18e3538ff62c53f43",
+      "transactionIndex": "0x5",
+      "value": "0x0",
+      "type": "0x2",
+      "accessList": [],
+      "chainId": "0x1237",
+      "v": "0x0",
+      "r": "0xb11b5fef79f6e0343a350aef21bb979158fc81e3b827ac859403f02c25184654",
+      "s": "0x7a5d423f6d716fc4ef16954108dde6170dc6f378f6320a09e3fb3b31903122ba",
+      "yParity": "0x0"
+    },
+    "block": "0x405ca2a",
+    "state": {
+      "getReserves()": "0x00000000000000000000000000000000000000000000000682d435756e84eca7000000000000000000000000000000000000000001dc04e9689ac6ba3723b37b",
+      "feeBps()": "0x0000000000000000000000000000000000000000000000000000000000000064",
+      "creatorTaxBps()": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "token_decimals": "0x0000000000000000000000000000000000000000000000000000000000000012",
+      "quote_decimals": "0x0000000000000000000000000000000000000000000000000000000000000012"
+    },
+    "simulations": [
+      {
+        "signature": "buy(uint256,uint256,address)",
+        "amount": "120107683140732",
+        "call": {
+          "from": "0x2fd2161a01207785315e5419ad72c918b8e123cd",
+          "to": "0x6EEb1d7d879DC399d4A3E7C18E3538FF62c53F43",
+          "value": "0x0",
+          "data": "0x59a87bc100000000000000000000000000000000000000000000000000006d3cbfc9d47c00000000000000000000000000000000000000000000000000000000000000010000000000000000000000002fd2161a01207785315e5419ad72c918b8e123cd"
+        },
+        "status": "ContractCallError"
+      },
+      {
+        "signature": "sell(uint256,uint256,address)",
+        "amount": "575471885231419569515",
+        "call": {
+          "from": "0x2fd2161a01207785315e5419ad72c918b8e123cd",
+          "to": "0x6EEb1d7d879DC399d4A3E7C18E3538FF62c53F43",
+          "value": "0x0",
+          "data": "0xd04c698300000000000000000000000000000000000000000000001f3246d6a32320356b00000000000000000000000000000000000000000000000000000000000000010000000000000000000000002fd2161a01207785315e5419ad72c918b8e123cd"
+        },
+        "result": "0x00000000000000000000000000000000000000000000000000006c2512f17156",
+        "status": "success"
+      }
+    ]
+  }
+]
