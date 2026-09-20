@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 config/.env
+config/flow.env
 data/
 logs/
 research/

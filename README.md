@@ -193,8 +193,9 @@ overlap, orphan cleanup, deep-fork stop, read-only RPC validation, response ID v
 bounded jitter/backoff, shrinking log ranges, and disconnect recovery. Live deployment evidence and remaining limitations
 are recorded in `docs/phase1-report.md`.
 
-Phase 2B is not implemented. Phase 2A adds market-state collection only: no scoring,
-signals, wallets, swaps, signing, or trading.
+Phase 2B collects sampled early flow in an independent service/database. Current
+deployment status and limitations: [Phase 2B implementation report](docs/phase2b-implementation.md).
+No scoring, signals, wallets, swap execution, signing, or trading.
 Deployment/backup evidence and rollback instructions: [Phase 1.5 report](docs/phase15-report.md)
 and [Phase 1.6 report](docs/phase16-report.md).
 
@@ -219,4 +220,18 @@ No USD conversion is stored.
 .venv/bin/python scripts/market_usage_report.py --hours 24
 .venv/bin/python scripts/outcome_report.py --days 7 --min-completeness 0.5
 .venv/bin/python scripts/inspect_market_history.py TOKEN_ADDRESS
+```
+
+## Phase 2B flow
+
+Reads persisted Phase 2A sample decisions; initial cohort tracks 15 minutes and
+long cohort one hour. Curve caller/recipient and V4 sender remain separate;
+economic actors are unknown. Quote amounts retain explicit curve/core/hook semantics.
+See [operation and configuration](docs/phase2b-flow-operations.md).
+
+```sh
+.venv/bin/python scripts/flow_usage_report.py --hours 24
+.venv/bin/python scripts/inspect_flow_history.py TOKEN_ADDRESS
+.venv/bin/python scripts/rebuild_flow_features.py --token TOKEN_ADDRESS
+.venv/bin/python scripts/flow_outcome_report.py --days 7 --feature-window 300 --outcome-horizon 3600
 ```

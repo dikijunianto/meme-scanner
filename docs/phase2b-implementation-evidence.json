@@ -1,0 +1,1108 @@
+{
+  "recommendation": "NOT_READY",
+  "reason": "Credential-bearing HTTP-library INFO logs found in VPS journal; fix deployed/tested, flow stopped/disabled pending key rotation.",
+  "baseline": {
+    "at": 1789892929.445729,
+    "preflight": "READY",
+    "tests_output": "checkpoint=10; searching retained ancestors\nRecorded startup-gap blocks=10..98; no automatic backfill\n----------------------------------------------------------------------\nRan 82 tests in 6.289s\n\nOK\n",
+    "base_before": "MainPID=842555\nNRestarts=0\nMemoryCurrent=106328064\nActiveState=active\n",
+    "counts_before": {
+      "launches": 193867,
+      "graduations": 2497,
+      "market_snapshots": 12593,
+      "outcome_targets": 40613
+    },
+    "main_integrity_before": "ok",
+    "journal_mode": "wal",
+    "backup": {
+      "backup_path": "/opt/meme-scanner/data/phase2b-backup-20260920T082841Z",
+      "integrity": {
+        "main": "ok",
+        "flow_after": "ok"
+      },
+      "main_database_modified": false
+    },
+    "disabled_result": "2026-09-20 15:28:46,041 INFO Phase 2B disabled; no database or network activity\n",
+    "flow_usage_rows_disabled": 0,
+    "base_after": "MainPID=842555\nNRestarts=0\nMemoryCurrent=106328064\nActiveState=active\n"
+  },
+  "cost_before": {
+    "as_of": "2026-09-20T08:30:01.371985+00:00",
+    "production_window_hours": 24,
+    "stock_launches": 1502,
+    "initial_sampled": 147,
+    "long_sampled": 79,
+    "average_active_inferred": 4.0,
+    "average_curve_active_inferred": 3.989710648148148,
+    "average_v4_active_inferred": 0.010289351851851852,
+    "historical_peak_active": 16,
+    "expected_average_subscriptions_inferred": 4.010289351851852,
+    "peak_subscription_capacity_inferred": 32,
+    "configured_subscription_cap": 64,
+    "http_scenarios": {
+      "new_target_typical_members": 5,
+      "new_target_max_attempts_bounded_by_daily_budget": 1000,
+      "reconnect_max_blocks_per_filter": 100,
+      "reconnect_getlogs_per_filter_without_rejection": 10,
+      "recovery_headers": "unique missing-timestamp blocks only; included in HTTP cap",
+      "tx_enrichment": 0
+    },
+    "event_rate_before_benchmark": "NOT YET MEASURED; curve/V4/hook activity unknown",
+    "ws_capacity_bytes_day": 8000000,
+    "raw_rows_capacity_scenario_day": 16000.0,
+    "inferred_db_bytes_day": 70536000.0,
+    "inferred_db_bytes_30days": 2116080000.0,
+    "free_disk_bytes": 32808058880,
+    "base_ws_bytes_24h": 9891108,
+    "base_estimated_cu_month": 15564189.6,
+    "flow_max_estimated_cu_month": 11400000.0,
+    "combined_estimated_cu_month": 26964189.6,
+    "free_plan_cu_month": 30000000,
+    "safe_to_enable": true,
+    "classification": "INFERRED, local telemetry projections; not provider billing or quota remaining",
+    "cost_source": "https://www.alchemy.com/docs/reference/compute-unit-costs",
+    "uncertainty": "Short-term production volume can change; WS message in flight can slightly overshoot cap; flow stops first at its persisted budget."
+  },
+  "timestamp_probe": {
+    "observed_at": "2026-09-20T08:04:21.620640+00:00",
+    "stock_launches_24h": 1504,
+    "initial_24h": 147,
+    "long_24h": 79,
+    "historical_peak_active": 16,
+    "average_active_inferred": 4.0,
+    "live_logs": [
+      {
+        "address": "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e",
+        "topics": [
+          "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607",
+          "0x00000000000000000000000026f9fa025a39312175f89cb158e2be77cb234aa3",
+          "0x000000000000000000000000ca015a98444087782223d7989a83ba6d66953b4d",
+          "0x0000000000000000000000003cbfac57520212f6ff95b71ee029eec48847833a"
+        ],
+        "data": "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003a4965bf58a40000",
+        "blockNumber": "0x40a4504",
+        "transactionHash": "0xb12fe83c23f3aefac2b05066f4ce34f4e3259af67a1a6834def9d3c44107d90f",
+        "transactionIndex": "0x9",
+        "blockHash": "0x2b231d7ec51de1eb97c103bde50785fc98b2b7ae4d282f78d542392edf652e09",
+        "blockTimestamp": "0x6aaf9397",
+        "logIndex": "0x24",
+        "removed": false
+      },
+      {
+        "address": "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e",
+        "topics": [
+          "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607",
+          "0x00000000000000000000000024e23af7455a850bc886f3c4c6ec0a8880915a28",
+          "0x0000000000000000000000001e0c19a40306063aa2b8c33c5f4fbf08c476826f",
+          "0x000000000000000000000000904e0ffa0e595742ffa41210affe018d9ae1054d"
+        ],
+        "data": "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003a4965bf58a40000",
+        "blockNumber": "0x40a4526",
+        "transactionHash": "0x9810e760c0b6ac8b973972fa3e140d9e6e706630fd17998f602baf3a3df1da74",
+        "transactionIndex": "0x2",
+        "blockHash": "0xd739341ed70996f4c939bb9f0d2792ca88e7307ee63c90b8d08298c52ead06dd",
+        "blockTimestamp": "0x6aaf939a",
+        "logIndex": "0x4",
+        "removed": false
+      },
+      {
+        "address": "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e",
+        "topics": [
+          "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607",
+          "0x0000000000000000000000001c5ab4312479ff1633a2fa439efea9d176a3166b",
+          "0x0000000000000000000000002440a7b87f459c76710a7edd0600c45a5185cc7d",
+          "0x00000000000000000000000049e34aaca120aa2f3387e9a421e2c4edfba4fbc6"
+        ],
+        "data": "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003a4965bf58a40000",
+        "blockNumber": "0x40a4554",
+        "transactionHash": "0x6e9a7b94caa113e758d7b2a04d45c066f12db257148bc1726ec707cb32ab5c7e",
+        "transactionIndex": "0x7",
+        "blockHash": "0xc967a4a67eba10f599d79a434bcf17f2be51a792ea2e76f66dec311c73507339",
+        "blockTimestamp": "0x6aaf939f",
+        "logIndex": "0x7",
+        "removed": false
+      },
+      {
+        "address": "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e",
+        "topics": [
+          "0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607",
+          "0x000000000000000000000000d960b7943039c8b9fa4e5838f728d53c531db8fb",
+          "0x00000000000000000000000058e8c2ac0407a442e7bad50f15579385815b3a53",
+          "0x0000000000000000000000006318d9fc0e15bf7ad9fab6a0946a088408bee46b"
+        ],
+        "data": "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003a4965bf58a40000",
+        "blockNumber": "0x40a4558",
+        "transactionHash": "0x068babcc6532ea8a9e690e4ec67dfb5e7dd74f88ec8b8dfa61687b2641b5794a",
+        "transactionIndex": "0x18",
+        "blockHash": "0x83d5fdb69c9b9df9a81e911b484adfd7d5b19fab2dc1abdd51406fd245627cf3",
+        "blockTimestamp": "0x6aaf93a0",
+        "logIndex": "0x1f",
+        "removed": false
+      }
+    ],
+    "seconds": 30.000804802053608,
+    "heads": 0,
+    "head_bytes": 0,
+    "log_bytes": 3791,
+    "timestamp_checks": [
+      {
+        "log_timestamp": "0x6aaf9397",
+        "header_timestamp": "0x6aaf9397",
+        "hash_matches": true
+      },
+      {
+        "log_timestamp": "0x6aaf939a",
+        "header_timestamp": "0x6aaf939a",
+        "hash_matches": true
+      },
+      {
+        "log_timestamp": "0x6aaf939f",
+        "header_timestamp": "0x6aaf939f",
+        "hash_matches": true
+      }
+    ]
+  },
+  "benchmark": {
+    "started_at": "2026-09-20T08:31:13.893821+00:00",
+    "duration_seconds": 1800.0148565769196,
+    "complete": true,
+    "samples": 61,
+    "first": {
+      "at": 1789893073.9076972,
+      "services": {
+        "meme-scanner": {
+          "MainPID": 842555,
+          "NRestarts": 0,
+          "MemoryCurrent": 106356736,
+          "CPUUsageNSec": 923506647000,
+          "ActiveState": "active",
+          "rss_bytes": 55947264
+        },
+        "meme-scanner-flow": {
+          "MainPID": 3840043,
+          "NRestarts": 0,
+          "MemoryCurrent": 34832384,
+          "CPUUsageNSec": 2061378000,
+          "ActiveState": "active",
+          "rss_bytes": 52019200
+        }
+      },
+      "main_counts": {
+        "launches": 193874,
+        "graduations": 2497,
+        "market_snapshots": 12593,
+        "outcome_targets": 40613
+      },
+      "flow_targets": 0,
+      "flow_raw_rows": 0,
+      "flow_state": "connected",
+      "flow_heartbeat": "1789893072.7144988",
+      "flow_db_allocated_bytes": 531008
+    },
+    "last": {
+      "at": 1789894873.9066603,
+      "services": {
+        "meme-scanner": {
+          "MainPID": 842555,
+          "NRestarts": 0,
+          "MemoryCurrent": 106504192,
+          "CPUUsageNSec": 924361164000,
+          "ActiveState": "active",
+          "rss_bytes": 55947264
+        },
+        "meme-scanner-flow": {
+          "MainPID": 3840043,
+          "NRestarts": 0,
+          "MemoryCurrent": 41304064,
+          "CPUUsageNSec": 42742024000,
+          "ActiveState": "active",
+          "rss_bytes": 54562816
+        }
+      },
+      "main_counts": {
+        "launches": 194020,
+        "graduations": 2498,
+        "market_snapshots": 12596,
+        "outcome_targets": 40641
+      },
+      "flow_targets": 1,
+      "flow_raw_rows": 68,
+      "flow_state": "connected",
+      "flow_heartbeat": "1789894873.2089999",
+      "flow_db_allocated_bytes": 4341240
+    },
+    "peak_combined_rss_bytes": 110510080,
+    "peak_combined_cgroup_bytes": 147808256,
+    "cpu_pct_one_core": {
+      "meme-scanner": 0.04747277484281609,
+      "meme-scanner-flow": 2.260017235488945
+    },
+    "usage": {
+      "hours": 0.5000041277541054,
+      "as_of": "2026-09-20T09:01:13.908684+00:00",
+      "tracked_launches": 1,
+      "initial_cohort_tracked": 1,
+      "long_cohort_tracked": 1,
+      "target_status_all_time": {
+        "active_curve": 1
+      },
+      "events_in_period": {
+        "curve": 68
+      },
+      "raw_rows_all_time": 68,
+      "coverage": {
+        "complete": 3
+      },
+      "windows": [
+        {
+          "window_seconds": 30,
+          "coverage_quality": "complete",
+          "n": 1
+        },
+        {
+          "window_seconds": 60,
+          "coverage_quality": "complete",
+          "n": 1
+        },
+        {
+          "window_seconds": 300,
+          "coverage_quality": "complete",
+          "n": 1
+        }
+      ],
+      "active_average": 0.2,
+      "active_peak": 1,
+      "subscriptions_average": 0.2,
+      "subscriptions_peak": 1,
+      "curve_subscriptions_peak": 1,
+      "v4_subscriptions_peak": 0,
+      "hook_subscriptions_peak": 0,
+      "metrics": {
+        "flow_curve_buy_events": 32,
+        "flow_curve_sell_events": 36,
+        "flow_duplicate_events": 4,
+        "flow_eth_blockNumber": 1,
+        "flow_eth_call": 1,
+        "flow_eth_getBlockByNumber": 1,
+        "flow_eth_getLogs": 6,
+        "flow_events_stored": 68,
+        "flow_http_calls": 9,
+        "flow_recovery_blocks": 52,
+        "flow_recovery_header_calls": 1,
+        "flow_rpc_http_total": 9,
+        "flow_rpc_members": 9,
+        "flow_rpc_method:eth_blockNumber": 1,
+        "flow_rpc_method:eth_call": 1,
+        "flow_rpc_method:eth_getBlockByNumber": 1,
+        "flow_rpc_method:eth_getLogs": 6,
+        "flow_targets_created": 1,
+        "flow_ws_bytes": 59462,
+        "flow_eth_getTransactionByHash": 0,
+        "flow_eth_getTransactionReceipt": 0,
+        "flow_removed_events": 0,
+        "flow_subscription_reconnects": 0,
+        "flow_v4_swap_events": 0,
+        "flow_hook_fee_events": 0
+      },
+      "budget_utilization_utc_day": {
+        "rpc_members": {
+          "used": 9,
+          "limit": 1000,
+          "pct": 0.9
+        },
+        "getLogs": {
+          "used": 6,
+          "limit": 400,
+          "pct": 1.5
+        },
+        "ws_bytes": {
+          "used": 59504,
+          "limit": 8000000,
+          "pct": 0.74
+        }
+      },
+      "db_growth": {
+        "sample_seconds": 1770.0,
+        "bytes": 3563032,
+        "inferred_bytes_per_day": 173924273.8983051,
+        "inferred_projection_bytes": {
+          "7": 1217469917.2881355,
+          "30": 5217728216.949153,
+          "90": 15653184650.847458
+        }
+      },
+      "oldest_active_tracking_start": 1789894536.0,
+      "phase2b_coverage_start_at": "1789893004.0054317",
+      "service_status": "connected",
+      "billing": "local counters only; no provider billing or remaining-quota data",
+      "sample_note": "30-second gauges; projections include allocated DB/WAL overhead, not raw bytes/event"
+    }
+  },
+  "final_live_validation": {
+    "at": "2026-09-20T12:51:08.469304+00:00",
+    "integrity": {
+      "main": "ok",
+      "flow": "ok"
+    },
+    "journal_modes": {
+      "main": "wal",
+      "flow": "wal"
+    },
+    "preservation": {
+      "launches": {
+        "backup_rows": 193867,
+        "current_rows": 195454,
+        "missing_original_ids": 0,
+        "changed_original_rows": 0
+      },
+      "graduations": {
+        "backup_rows": 2497,
+        "current_rows": 2507,
+        "missing_original_ids": 0,
+        "changed_original_rows": 0
+      },
+      "market_snapshots": {
+        "backup_rows": 12593,
+        "current_rows": 12644,
+        "missing_original_ids": 0,
+        "changed_original_rows": 0
+      },
+      "outcome_targets": {
+        "backup_rows": 40613,
+        "current_rows": 40837,
+        "missing_original_ids": 0
+      }
+    },
+    "live_validation": {
+      "persisted_cohorts": true,
+      "fixed_windows": true,
+      "curve_legs": true,
+      "v4_signs": true,
+      "identities_unknown": true,
+      "event_time_in_window": true,
+      "rebuild_matches_existing": true,
+      "raw_unchanged_by_rebuild": true
+    },
+    "services": {
+      "meme-scanner": "MainPID=842555\nNRestarts=0\nMemoryCurrent=107945984\nCPUUsageNSec=932354300000\nActiveState=active\n",
+      "meme-scanner-flow": "MainPID=0\nNRestarts=0\nMemoryCurrent=[not set]\nCPUUsageNSec=[not set]\nActiveState=inactive\n"
+    },
+    "flow_enabled": false,
+    "raw_counts": [
+      {
+        "phase": "curve",
+        "direction": "buy",
+        "n": 415
+      },
+      {
+        "phase": "curve",
+        "direction": "sell",
+        "n": 325
+      },
+      {
+        "phase": "hook",
+        "direction": null,
+        "n": 3895
+      },
+      {
+        "phase": "v4",
+        "direction": "buy",
+        "n": 2067
+      },
+      {
+        "phase": "v4",
+        "direction": "sell",
+        "n": 1858
+      }
+    ],
+    "raw_time_sources": [
+      {
+        "event_time_source": "log_block_timestamp",
+        "n": 8560
+      }
+    ],
+    "examples": {
+      "curve": {
+        "token": "0x04Cd9cF16A2A1cBBce83279009F73EA2005E756E",
+        "launch_id": 193991,
+        "graduation": null,
+        "first_events": [
+          {
+            "chain_id": 4663,
+            "tx_hash": "0x48e38ed9432cc92fb81becf5d5940e46ca780ca2daccaa9f67018cdf9ccdb2cc",
+            "log_index": 85,
+            "launch_id": 193991,
+            "phase": "curve",
+            "block_number": 67812184,
+            "block_hash": "0x14487fb52b6ead723d5cc0330bfc5295f92fb5601ff3118e63d86386c4138a4b",
+            "event_time": 1789894536.0,
+            "event_time_source": "log_block_timestamp",
+            "observed_at": 1789894543.845719,
+            "removed": 0,
+            "direction": "buy",
+            "caller_address": "0x254ae36344fd40f0d56f864e60ddfb733b82c96b",
+            "recipient_address": "0x254ae36344fd40f0d56f864e60ddfb733b82c96b",
+            "swap_sender": null,
+            "economic_actor": null,
+            "source_contract": "0xcaa52e22509b14cb3fe96bca334d2085038e7d9b",
+            "data_quality": "verified",
+            "payload": {
+              "transaction_from": null,
+              "economic_actor": null,
+              "economic_actor_basis": null,
+              "token_address": "0x04Cd9cF16A2A1cBBce83279009F73EA2005E756E",
+              "quote_asset_address": "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa",
+              "curve_address": "0xCAa52e22509B14cb3fE96Bca334d2085038E7d9b",
+              "caller_address": "0x254ae36344fd40f0d56f864e60ddfb733b82c96b",
+              "recipient_address": "0x254ae36344fd40f0d56f864e60ddfb733b82c96b",
+              "swap_sender": null,
+              "direction": "buy",
+              "origin_class": "unknown",
+              "phase": "curve",
+              "source_event_name": "CurveBuy",
+              "refund_quote_raw": null,
+              "refund_quote_normalized": null,
+              "tokens_amount_raw": "145305246034374850749368196",
+              "tokens_amount_normalized": "145305246.034374850749368196",
+              "quote_event_amount_raw": "4959435542589092759",
+              "quote_event_amount_normalized": "4.959435542589092759",
+              "pricing_quote_amount_raw": "4909841187163201832",
+              "pricing_quote_amount_normalized": "4.909841187163201832",
+              "base_fee_quote_raw": "49594355425890927",
+              "base_fee_quote_normalized": "0.049594355425890927",
+              "creator_tax_quote_raw": "0",
+              "creator_tax_quote_normalized": "0"
+            },
+            "age_seconds": 0.0
+          },
+          {
+            "chain_id": 4663,
+            "tx_hash": "0x48e38ed9432cc92fb81becf5d5940e46ca780ca2daccaa9f67018cdf9ccdb2cc",
+            "log_index": 89,
+            "launch_id": 193991,
+            "phase": "curve",
+            "block_number": 67812184,
+            "block_hash": "0x14487fb52b6ead723d5cc0330bfc5295f92fb5601ff3118e63d86386c4138a4b",
+            "event_time": 1789894536.0,
+            "event_time_source": "log_block_timestamp",
+            "observed_at": 1789894543.848479,
+            "removed": 0,
+            "direction": "buy",
+            "caller_address": "0x254ae36344fd40f0d56f864e60ddfb733b82c96b",
+            "recipient_address": "0x40e5865b602f57b1e4e96628cc716f2fb4792d0b",
+            "swap_sender": null,
+            "economic_actor": null,
+            "source_contract": "0xcaa52e22509b14cb3fe96bca334d2085038e7d9b",
+            "data_quality": "verified",
+            "payload": {
+              "transaction_from": null,
+              "economic_actor": null,
+              "economic_actor_basis": null,
+              "token_address": "0x04Cd9cF16A2A1cBBce83279009F73EA2005E756E",
+              "quote_asset_address": "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa",
+              "curve_address": "0xCAa52e22509B14cb3fE96Bca334d2085038E7d9b",
+              "caller_address": "0x254ae36344fd40f0d56f864e60ddfb733b82c96b",
+              "recipient_address": "0x40e5865b602f57b1e4e96628cc716f2fb4792d0b",
+              "swap_sender": null,
+              "direction": "buy",
+              "origin_class": "unknown",
+              "phase": "curve",
+              "source_event_name": "CurveBuy",
+              "refund_quote_raw": null,
+              "refund_quote_normalized": null,
+              "tokens_amount_raw": "46892474624257100873586672",
+              "tokens_amount_normalized": "46892474.624257100873586672",
+              "quote_event_amount_raw": "1981294499264342557",
+              "quote_event_amount_normalized": "1.981294499264342557",
+              "pricing_quote_amount_raw": "1961481554271699132",
+              "pricing_quote_amount_normalized": "1.961481554271699132",
+              "base_fee_quote_raw": "19812944992643425",
+              "base_fee_quote_normalized": "0.019812944992643425",
+              "creator_tax_quote_raw": "0",
+              "creator_tax_quote_normalized": "0"
+            },
+            "age_seconds": 0.0
+          }
+        ],
+        "gaps": []
+      },
+      "v4": {
+        "token": "0x094dFC1425EeD5e58D459122967098B8139D44c9",
+        "launch_id": 195021,
+        "graduation": {
+          "id": 2507,
+          "tx_hash": "0x3f2eb2832dbe24ff7d8decca43aa2edd88cd3468f4415d9996d67999438deb2f",
+          "log_index": 62,
+          "block_number": 67926200,
+          "block_timestamp": "2026-09-20T12:07:50+00:00",
+          "factory_address": "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e",
+          "token_address": "0x094dFC1425EeD5e58D459122967098B8139D44c9",
+          "quote_asset_address": "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa",
+          "curve_address": "0x95Da25a608d8a3B90E9A00d2C59DE8d284148F24",
+          "creator_address": "0xd6EBCbb3C3F2f9F675F1F7F32D17Fd55DBE7c0eD",
+          "pool_id": "0xc1630e2386a682bb56eb7493f13a65bd8418f7c82198ec09bf38b4d678019085",
+          "pool_manager_address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+          "currency0": "0x094dFC1425EeD5e58D459122967098B8139D44c9",
+          "currency1": "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa",
+          "fee": 0,
+          "tick_spacing": 200,
+          "hooks": "0xE5e702641Ea86F4ae6cC3cDaeD2B886f976Be044",
+          "position_id": "2996129",
+          "token_amount": "204081632653061224670699304",
+          "quote_amount": "72200000000000000224",
+          "raw_event_name": "PoolGraduated",
+          "detected_at": "2026-09-20T12:07:50+00:00"
+        },
+        "first_events": [
+          {
+            "chain_id": 4663,
+            "tx_hash": "0x333381f59fa0f77eeadbab4e845bbf80611ccb1a8bd2576da7516f94b153d82d",
+            "log_index": 14,
+            "launch_id": 195021,
+            "phase": "curve",
+            "block_number": 67909464,
+            "block_hash": "0x09d40b066dda750331b992c92a9bdb707d95d04907fabd87fc4f35d32b58c867",
+            "event_time": 1789904381.0,
+            "event_time_source": "log_block_timestamp",
+            "observed_at": 1789904387.5406961,
+            "removed": 0,
+            "direction": "buy",
+            "caller_address": "0xe33e9e479df8802cb0866d5d05258bec4cf62948",
+            "recipient_address": "0xd6ebcbb3c3f2f9f675f1f7f32d17fd55dbe7c0ed",
+            "swap_sender": null,
+            "economic_actor": null,
+            "source_contract": "0x95da25a608d8a3b90e9a00d2c59de8d284148f24",
+            "data_quality": "verified",
+            "payload": {
+              "transaction_from": null,
+              "economic_actor": null,
+              "economic_actor_basis": null,
+              "token_address": "0x094dFC1425EeD5e58D459122967098B8139D44c9",
+              "quote_asset_address": "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa",
+              "curve_address": "0x95Da25a608d8a3B90E9A00d2C59DE8d284148F24",
+              "caller_address": "0xe33e9e479df8802cb0866d5d05258bec4cf62948",
+              "recipient_address": "0xd6ebcbb3c3f2f9f675f1f7f32d17fd55dbe7c0ed",
+              "swap_sender": null,
+              "direction": "buy",
+              "origin_class": "unknown",
+              "phase": "curve",
+              "source_event_name": "CurveBuy",
+              "refund_quote_raw": null,
+              "refund_quote_normalized": null,
+              "tokens_amount_raw": "126091861116478225049425161",
+              "tokens_amount_normalized": "126091861.116478225049425161",
+              "quote_event_amount_raw": "4209042056576619585",
+              "quote_event_amount_normalized": "4.209042056576619585",
+              "pricing_quote_amount_raw": "4166951636010853390",
+              "pricing_quote_amount_normalized": "4.16695163601085339",
+              "base_fee_quote_raw": "42090420565766195",
+              "base_fee_quote_normalized": "0.042090420565766195",
+              "creator_tax_quote_raw": "0",
+              "creator_tax_quote_normalized": "0"
+            },
+            "age_seconds": 0.0
+          },
+          {
+            "chain_id": 4663,
+            "tx_hash": "0x5f959e4869f82b1301e3eb6331421c4ad25900cd1c0e1179430ea2fe91f015bf",
+            "log_index": 10,
+            "launch_id": 195021,
+            "phase": "curve",
+            "block_number": 67909466,
+            "block_hash": "0xbbf972a86de712522c71cb861932df6d371c0538159790bd4c841295c115f88c",
+            "event_time": 1789904382.0,
+            "event_time_source": "log_block_timestamp",
+            "observed_at": 1789904387.5436392,
+            "removed": 0,
+            "direction": "buy",
+            "caller_address": "0xab0f1f3913c9f1b3e2ae0081f2cb1c95ae4566e8",
+            "recipient_address": "0xab0f1f3913c9f1b3e2ae0081f2cb1c95ae4566e8",
+            "swap_sender": null,
+            "economic_actor": null,
+            "source_contract": "0x95da25a608d8a3b90e9a00d2c59de8d284148f24",
+            "data_quality": "verified",
+            "payload": {
+              "transaction_from": null,
+              "economic_actor": null,
+              "economic_actor_basis": null,
+              "token_address": "0x094dFC1425EeD5e58D459122967098B8139D44c9",
+              "quote_asset_address": "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa",
+              "curve_address": "0x95Da25a608d8a3B90E9A00d2C59DE8d284148F24",
+              "caller_address": "0xab0f1f3913c9f1b3e2ae0081f2cb1c95ae4566e8",
+              "recipient_address": "0xab0f1f3913c9f1b3e2ae0081f2cb1c95ae4566e8",
+              "swap_sender": null,
+              "direction": "buy",
+              "origin_class": "unknown",
+              "phase": "curve",
+              "source_event_name": "CurveBuy",
+              "refund_quote_raw": null,
+              "refund_quote_normalized": null,
+              "tokens_amount_raw": "39472514216659340117725165",
+              "tokens_amount_normalized": "39472514.216659340117725165",
+              "quote_event_amount_raw": "1684192749606683031",
+              "quote_event_amount_normalized": "1.684192749606683031",
+              "pricing_quote_amount_raw": "1563267710184923190",
+              "pricing_quote_amount_normalized": "1.56326771018492319",
+              "base_fee_quote_raw": "120925039421759841",
+              "base_fee_quote_normalized": "0.120925039421759841",
+              "creator_tax_quote_raw": "0",
+              "creator_tax_quote_normalized": "0"
+            },
+            "age_seconds": 1.0
+          }
+        ],
+        "gaps": [
+          {
+            "id": 1,
+            "launch_id": 195021,
+            "start_at": 1789906903.3193822,
+            "end_at": 1789906918.4377277,
+            "reason": "ws_gap",
+            "resolved": 0,
+            "first_block": 67934520
+          }
+        ]
+      }
+    },
+    "logical_db_bytes": 16818176,
+    "backup_permissions": {
+      "directory": "0o700",
+      "main": "0o600"
+    },
+    "outcome_missingness": {
+      "unsampled": 19977,
+      "feature_not_deployed_yet": 2131,
+      "feature_window_not_due": 0,
+      "feature_partial": 0,
+      "feature_missing": 3,
+      "outcome_unsampled": 3,
+      "outcome_not_due": 1,
+      "outcome_missing": 0,
+      "invalid_market_price": 0,
+      "valid_pair": 5
+    },
+    "outcome_group_sizes": {
+      "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa": {
+        "all_valid_pairs": 4,
+        "ge_1_25x": 1,
+        "ge_1_5x": 1,
+        "ge_2x": 1,
+        "lt_2x": 3,
+        "le_0_75x": 3,
+        "le_0_5x": 0
+      },
+      "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3": {
+        "all_valid_pairs": 1,
+        "ge_1_25x": 0,
+        "ge_1_5x": 0,
+        "ge_2x": 0,
+        "lt_2x": 1,
+        "le_0_75x": 0,
+        "le_0_5x": 0
+      }
+    },
+    "preflight_gate": "READY"
+  },
+  "flow_usage_24h_command_output": {
+    "hours": 24,
+    "as_of": "2026-09-20T12:51:08.457108+00:00",
+    "tracked_launches": 9,
+    "initial_cohort_tracked": 9,
+    "long_cohort_tracked": 6,
+    "target_status_all_time": {
+      "active_curve": 1,
+      "completed": 6,
+      "partial": 2
+    },
+    "events_in_period": {
+      "curve": 740,
+      "hook": 3895,
+      "v4": 3925
+    },
+    "raw_rows_all_time": 8560,
+    "coverage": {
+      "complete": 38,
+      "partial": 3
+    },
+    "windows": [
+      {
+        "window_seconds": 30,
+        "coverage_quality": "complete",
+        "n": 9
+      },
+      {
+        "window_seconds": 60,
+        "coverage_quality": "complete",
+        "n": 9
+      },
+      {
+        "window_seconds": 300,
+        "coverage_quality": "complete",
+        "n": 9
+      },
+      {
+        "window_seconds": 900,
+        "coverage_quality": "complete",
+        "n": 7
+      },
+      {
+        "window_seconds": 900,
+        "coverage_quality": "partial",
+        "n": 2
+      },
+      {
+        "window_seconds": 3600,
+        "coverage_quality": "complete",
+        "n": 4
+      },
+      {
+        "window_seconds": 3600,
+        "coverage_quality": "partial",
+        "n": 1
+      }
+    ],
+    "active_average": 1.353061224489796,
+    "active_peak": 4,
+    "subscriptions_average": 1.4081632653061225,
+    "subscriptions_peak": 4,
+    "curve_subscriptions_peak": 4,
+    "v4_subscriptions_peak": 1,
+    "hook_subscriptions_peak": 1,
+    "metrics": {
+      "flow_curve_buy_events": 415,
+      "flow_curve_sell_events": 325,
+      "flow_duplicate_events": 13,
+      "flow_eth_blockNumber": 10,
+      "flow_eth_call": 5,
+      "flow_eth_getBlockByNumber": 9,
+      "flow_eth_getLogs": 54,
+      "flow_events_stored": 8560,
+      "flow_hook_fee_events": 3895,
+      "flow_http_calls": 78,
+      "flow_recovery_blocks": 471,
+      "flow_recovery_header_calls": 9,
+      "flow_rpc_http_total": 78,
+      "flow_rpc_members": 78,
+      "flow_rpc_method:eth_blockNumber": 10,
+      "flow_rpc_method:eth_call": 5,
+      "flow_rpc_method:eth_getBlockByNumber": 9,
+      "flow_rpc_method:eth_getLogs": 54,
+      "flow_targets_completed": 6,
+      "flow_targets_created": 9,
+      "flow_v4_buy_events": 2067,
+      "flow_v4_sell_events": 1858,
+      "flow_v4_swap_events": 3925,
+      "flow_ws_bytes": 8000636,
+      "flow_eth_getTransactionByHash": 0,
+      "flow_eth_getTransactionReceipt": 0,
+      "flow_removed_events": 0,
+      "flow_subscription_reconnects": 0
+    },
+    "budget_utilization_utc_day": {
+      "rpc_members": {
+        "used": 78,
+        "limit": 1000,
+        "pct": 7.8
+      },
+      "getLogs": {
+        "used": 54,
+        "limit": 400,
+        "pct": 13.5
+      },
+      "ws_bytes": {
+        "used": 8000636,
+        "limit": 8000000,
+        "pct": 100.01
+      }
+    },
+    "db_growth": {
+      "sample_seconds": 15480.0,
+      "bytes": 20622016,
+      "inferred_bytes_per_day": 115099624.18604651,
+      "inferred_projection_bytes": {
+        "7": 805697369.3023256,
+        "30": 3452988725.581395,
+        "90": 10358966176.744186
+      }
+    },
+    "oldest_active_tracking_start": 1789906439.0,
+    "phase2b_coverage_start_at": "1789893004.0054317",
+    "service_status": "paused_ws_budget",
+    "billing": "local counters only; no provider billing or remaining-quota data",
+    "sample_note": "30-second gauges; projections include allocated DB/WAL overhead, not raw bytes/event"
+  },
+  "insertion_benchmark": {
+    "classification": "TEST VERIFIED on VPS temporary SQLite WAL database; production untouched",
+    "rows": 1000,
+    "seconds": 3.168372285901569,
+    "rows_per_second": 315.61947579510763,
+    "logical_bytes_per_inserted_row": 2306.048,
+    "integrity": "ok"
+  },
+  "outcome_excerpt": {
+    "days": 7,
+    "as_of": "2026-09-20T12:51:07.377355+00:00",
+    "feature_window_seconds": 300,
+    "outcome_horizon_seconds": 3600,
+    "outcome_metric": "marginal_price_multiple",
+    "price_semantics": "pre-fee marginal market price; not trader ROI",
+    "feature_coverage_filter": "complete",
+    "denominator_all_stock_launches": 22120,
+    "missingness_exclusive_first_reason": {
+      "unsampled": 19977,
+      "feature_not_deployed_yet": 2131,
+      "feature_window_not_due": 0,
+      "feature_partial": 0,
+      "feature_missing": 3,
+      "outcome_unsampled": 3,
+      "outcome_not_due": 1,
+      "outcome_missing": 0,
+      "invalid_market_price": 0,
+      "valid_pair": 5
+    },
+    "warnings": [
+      "descriptive only",
+      "sampled local participant history only",
+      "quote-native amounts are never pooled across assets",
+      "small_sample"
+    ],
+    "groups_by_quote_address": {
+      "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa": {
+        "all_valid_pairs": {
+          "N": 4,
+          "selected_features": {
+            "curve_buy_count": {
+              "N": 4,
+              "p25": "6.25",
+              "median": "19.0",
+              "p75": "31.75",
+              "p90": "33.1"
+            },
+            "curve_net_pricing_quote_flow": {
+              "N": 4,
+              "p25": "1.28254679972736401000",
+              "median": "2.3391272138093976790",
+              "p75": "3.84528298242279860275",
+              "p90": "4.6896233786982370597"
+            },
+            "unique_buy_recipients": {
+              "N": 4,
+              "p25": "6.25",
+              "median": "11.5",
+              "p75": "16.75",
+              "p90": "18.1"
+            }
+          }
+        },
+        "ge_1_25x": {
+          "N": 1,
+          "selected_features": {
+            "curve_buy_count": {
+              "N": 1,
+              "p25": "34.00",
+              "median": "34.0",
+              "p75": "34.00",
+              "p90": "34.0"
+            },
+            "curve_net_pricing_quote_flow": {
+              "N": 1,
+              "p25": "5.25251697621519603100",
+              "median": "5.2525169762151960310",
+              "p75": "5.25251697621519603100",
+              "p90": "5.2525169762151960310"
+            },
+            "unique_buy_recipients": {
+              "N": 1,
+              "p25": "19.00",
+              "median": "19.0",
+              "p75": "19.00",
+              "p90": "19.0"
+            }
+          }
+        },
+        "ge_1_5x": {
+          "N": 1,
+          "selected_features": {
+            "curve_buy_count": {
+              "N": 1,
+              "p25": "34.00",
+              "median": "34.0",
+              "p75": "34.00",
+              "p90": "34.0"
+            },
+            "curve_net_pricing_quote_flow": {
+              "N": 1,
+              "p25": "5.25251697621519603100",
+              "median": "5.2525169762151960310",
+              "p75": "5.25251697621519603100",
+              "p90": "5.2525169762151960310"
+            },
+            "unique_buy_recipients": {
+              "N": 1,
+              "p25": "19.00",
+              "median": "19.0",
+              "p75": "19.00",
+              "p90": "19.0"
+            }
+          }
+        },
+        "ge_2x": {
+          "N": 1,
+          "selected_features": {
+            "curve_buy_count": {
+              "N": 1,
+              "p25": "34.00",
+              "median": "34.0",
+              "p75": "34.00",
+              "p90": "34.0"
+            },
+            "curve_net_pricing_quote_flow": {
+              "N": 1,
+              "p25": "5.25251697621519603100",
+              "median": "5.2525169762151960310",
+              "p75": "5.25251697621519603100",
+              "p90": "5.2525169762151960310"
+            },
+            "unique_buy_recipients": {
+              "N": 1,
+              "p25": "19.00",
+              "median": "19.0",
+              "p75": "19.00",
+              "p90": "19.0"
+            }
+          }
+        },
+        "lt_2x": {
+          "N": 3,
+          "selected_features": {
+            "curve_buy_count": {
+              "N": 3,
+              "p25": "5.50",
+              "median": "7.0",
+              "p75": "19.00",
+              "p90": "26.2"
+            },
+            "curve_net_pricing_quote_flow": {
+              "N": 3,
+              "p25": "1.26304415632793212200",
+              "median": "1.3020494431267958980",
+              "p75": "2.33912721380939767900",
+              "p90": "2.9613738762189587476"
+            },
+            "unique_buy_recipients": {
+              "N": 3,
+              "p25": "5.50",
+              "median": "7.0",
+              "p75": "11.50",
+              "p90": "14.2"
+            }
+          }
+        },
+        "le_0_75x": {
+          "N": 3,
+          "selected_features": {
+            "curve_buy_count": {
+              "N": 3,
+              "p25": "5.50",
+              "median": "7.0",
+              "p75": "19.00",
+              "p90": "26.2"
+            },
+            "curve_net_pricing_quote_flow": {
+              "N": 3,
+              "p25": "1.26304415632793212200",
+              "median": "1.3020494431267958980",
+              "p75": "2.33912721380939767900",
+              "p90": "2.9613738762189587476"
+            },
+            "unique_buy_recipients": {
+              "N": 3,
+              "p25": "5.50",
+              "median": "7.0",
+              "p75": "11.50",
+              "p90": "14.2"
+            }
+          }
+        },
+        "le_0_5x": {
+          "N": 0,
+          "selected_features": {}
+        }
+      },
+      "0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3": {
+        "all_valid_pairs": {
+          "N": 1,
+          "selected_features": {
+            "curve_buy_count": {
+              "N": 1,
+              "p25": "0.00",
+              "median": "0.0",
+              "p75": "0.00",
+              "p90": "0.0"
+            },
+            "curve_net_pricing_quote_flow": {
+              "N": 1,
+              "p25": "0.00",
+              "median": "0.0",
+              "p75": "0.00",
+              "p90": "0.0"
+            },
+            "unique_buy_recipients": {
+              "N": 1,
+              "p25": "0.00",
+              "median": "0.0",
+              "p75": "0.00",
+              "p90": "0.0"
+            }
+          }
+        },
+        "ge_1_25x": {
+          "N": 0,
+          "selected_features": {}
+        },
+        "ge_1_5x": {
+          "N": 0,
+          "selected_features": {}
+        },
+        "ge_2x": {
+          "N": 0,
+          "selected_features": {}
+        },
+        "lt_2x": {
+          "N": 1,
+          "selected_features": {
+            "curve_buy_count": {
+              "N": 1,
+              "p25": "0.00",
+              "median": "0.0",
+              "p75": "0.00",
+              "p90": "0.0"
+            },
+            "curve_net_pricing_quote_flow": {
+              "N": 1,
+              "p25": "0.00",
+              "median": "0.0",
+              "p75": "0.00",
+              "p90": "0.0"
+            },
+            "unique_buy_recipients": {
+              "N": 1,
+              "p25": "0.00",
+              "median": "0.0",
+              "p75": "0.00",
+              "p90": "0.0"
+            }
+          }
+        },
+        "le_0_75x": {
+          "N": 0,
+          "selected_features": {}
+        },
+        "le_0_5x": {
+          "N": 0,
+          "selected_features": {}
+        }
+      }
+    }
+  }
+}
