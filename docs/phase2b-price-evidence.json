@@ -1,0 +1,112 @@
+{
+  "observed_at": "2026-09-20T02:22:38+00:00",
+  "source": "https://github.com/ponsdotdev/pons-labs/blob/162310fbd1217717e2f5e4cde794d6a11322b469/contractsV2/src/v2/PonsV2BondingCurve.sol",
+  "samples": [
+    {
+      "token_address": "0x39062DAF0FEe668562B4A5B2CB9B899CE7b8B3D3",
+      "curve_address": "0x88BBD7E6D81f6214e88E73Ce08f625c7A9519F28",
+      "quote_asset_address": "0x1b0E319c6A659F002271B69dB8A7df2F911c153E",
+      "quote_reserve_raw": "148188000000000000000",
+      "token_reserve_raw": "996032067373876427241072157",
+      "fee_bps": 100,
+      "creator_tax_bps": 100,
+      "quote_decimals": 18,
+      "graduated": false,
+      "runtime_keccak": "0x76439e9a1299adbbe93cccb68512d6b3dcf0d2717af36705f5daa7eaeefb5674",
+      "quote_selector_byte_presence_not_abi_proof": {
+        "getBuyQuote(uint256)": false,
+        "getSellQuote(uint256)": false,
+        "quoteBuy(uint256)": false,
+        "quoteSell(uint256)": false
+      },
+      "source_model": {
+        "label": "INFERRED: source-model estimates, not eth_call execution quotes",
+        "reserve_price_quote": "1.48778342439024390243902438216475461257743406702359710911134513513133710254414E-7",
+        "buy_input_raw": "148188000000000",
+        "buy_output_raw": "976110469438138849320",
+        "sell_input_raw": "996032067373876427241",
+        "sell_output_raw": "145224094775906",
+        "buy_implied_price_quote": "1.51814783920204061722277618249181002207562228963630042983977827653867541292953E-7",
+        "sell_implied_price_quote": "1.45802629787614893821148773182369167875641840939585812270616032266689200890954E-7",
+        "buy_relative_difference": "0.02040916326530612244916606732200856977996976213706106950162621284414166572750",
+        "sell_relative_difference": "-0.020000979999014765028136416711490910681745805112245794449979737304527507669611",
+        "buy_fee_adjusted_relative_difference": "9.8000000000000018274597556839838437036689431984811159368858725883241296E-7",
+        "sell_fee_adjusted_relative_difference": "-9.99998994658191975935419888684369128372563516116785693609494415824152664E-7"
+      }
+    },
+    {
+      "token_address": "0x8230EbEE6Fd5E24CeaDeEEd39aC5FDfe4327b2e2",
+      "curve_address": "0x2F31646B85148c1AA4Ace1d4086459028DF0c2c2",
+      "quote_asset_address": "0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa",
+      "quote_reserve_raw": "30144441405017864399",
+      "token_reserve_raw": "958053911564359437310144608",
+      "fee_bps": 100,
+      "creator_tax_bps": 0,
+      "quote_decimals": 18,
+      "graduated": false,
+      "runtime_keccak": "0x2717861bfccfcf6c529472b76a78b24a20dc77014c678a15039566983c947491",
+      "quote_selector_byte_presence_not_abi_proof": {
+        "getBuyQuote(uint256)": false,
+        "getSellQuote(uint256)": false,
+        "quoteBuy(uint256)": false,
+        "quoteSell(uint256)": false
+      },
+      "source_model": {
+        "label": "INFERRED: source-model estimates, not eth_call execution quotes",
+        "reserve_price_quote": "3.14642433386618905342617088992213606971957080843205099008861088211652573014714E-8",
+        "buy_input_raw": "30144441405017",
+        "buy_output_raw": "948472433460984921843",
+        "sell_input_raw": "958053911564359437310",
+        "sell_output_raw": "29842967148000",
+        "buy_implied_price_quote": "3.17820954426895116901568492584720277391258031292485267743345821181188507604700E-8",
+        "sell_implied_price_quote": "3.11495697557049546246482131898049859821560061273816966666648819573660762230355E-8",
+        "buy_relative_difference": "0.01010201010100434696276659631520751070987613608887142073467876887810508240681",
+        "sell_relative_difference": "-0.010000989999027840248007338388643408861791649718659681320495512760476359170099",
+        "buy_fee_adjusted_relative_difference": "9.8999999430349313893035205543560277737472798270652733198118932403158275E-7",
+        "sell_fee_adjusted_relative_difference": "-9.99999018020452532665039033746325042070422888566990399507838865009262726E-7"
+      }
+    },
+    {
+      "token_address": "0x3781F0E0F504bc84AD85D1A600db047F7856cFF9",
+      "curve_address": "0xD7ce9E3c0Ad370F70FF0fd4113bEF8d7DB4bA53d",
+      "quote_asset_address": "0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC",
+      "quote_reserve_raw": "16640000000000000000",
+      "token_reserve_raw": "1000000000000000000000000000",
+      "fee_bps": 100,
+      "creator_tax_bps": 0,
+      "quote_decimals": 18,
+      "graduated": false,
+      "runtime_keccak": "0xf7baaf20586c8ed3601f4fb99ae0ffb59f7e3ecb5bccb4f8ab3b800ef2e643fc",
+      "quote_selector_byte_presence_not_abi_proof": {
+        "getBuyQuote(uint256)": false,
+        "getSellQuote(uint256)": false,
+        "quoteBuy(uint256)": false,
+        "quoteSell(uint256)": false
+      },
+      "source_model": {
+        "label": "INFERRED: source-model estimates, not eth_call execution quotes",
+        "reserve_price_quote": "1.664E-8",
+        "buy_input_raw": "16640000000000",
+        "buy_output_raw": "989999019900970298039",
+        "sell_input_raw": "1000000000000000000000",
+        "sell_output_raw": "16473583526416",
+        "buy_implied_price_quote": "1.68080974480808080808149558528726073689460287278341927970918234825333627370917E-8",
+        "sell_implied_price_quote": "1.6473583526416E-8",
+        "buy_relative_difference": "0.01010201010101010101051417385051726976839114950926639405599900736378381833484",
+        "sell_relative_difference": "-0.010000989999038461538461538461538461538461538461538461538461538461538461538462",
+        "buy_fee_adjusted_relative_difference": "9.9000000000000040903211201209707070723801417373011543901729014598015149E-7",
+        "sell_fee_adjusted_relative_difference": "-9.9999902874902874902874902874902874902874902874902874902874902874902875E-7"
+      }
+    }
+  ],
+  "deployment_gate": "NOT_READY",
+  "reason": "Independent buy/sell execution quotes and deployed-source equivalence unverified",
+  "block": 67579535,
+  "rpc_attempt_counters": {
+    "http_total": 8,
+    "method:eth_chainId": 1,
+    "method:eth_blockNumber": 1,
+    "method:eth_call": 15,
+    "method:eth_getCode": 3
+  }
+}
