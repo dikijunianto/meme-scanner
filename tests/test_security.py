@@ -14,7 +14,7 @@ import httpx
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from flow_security_status import fingerprint,journal_counts,status
-from install_rpc_credential import install
+from install_rpc_credential import install,InstallationError,failure_reason
 from app.config import Config
 from app.flow_data import FlowDB
 from app.flow_worker import FlowSettings,FlowWorker,main as flow_main,cli as flow_cli
@@ -88,6 +88,15 @@ class SecurityTests(unittest.IsolatedAsyncioTestCase):
         with patch('app.flow_worker.main',side_effect=ValueError(HTTP)),redirect_stderr(errors):
             with self.assertRaises(SystemExit) as exit:flow_cli()
         self.assertEqual(exit.exception.code,1);self.clean(errors.getvalue());self.assertIn('ValueError',errors.getvalue())
+
+    def test_installer_only_exposes_its_fixed_validation_messages(self):
+        self.assertEqual(failure_reason(InstallationError('Keys do not match')),'Keys do not match')
+        for exc in (ValueError(HTTP),OSError(SECRET)):
+            self.clean(failure_reason(exc))
+        with self.assertRaises(InstallationError) as error:
+            install(self.root/'unused',HTTP,self.root/'staging')
+        self.assertIn('enter only the API key',failure_reason(error.exception))
+        self.clean(failure_reason(error.exception))
 
     def test_fingerprints_do_not_emit_values_and_match_http_wss(self):
         self.assertEqual(fingerprint(HTTP),fingerprint(WS));self.assertEqual(len(fingerprint(HTTP)),12)
