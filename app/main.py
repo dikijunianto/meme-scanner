@@ -24,6 +24,7 @@ def setup_logging(path):
                         handlers=[logging.StreamHandler(), RotatingFileHandler(
                             path, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8")])
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("websockets").setLevel(logging.CRITICAL)
 
 

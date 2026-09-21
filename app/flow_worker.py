@@ -414,4 +414,14 @@ def main():
     asyncio.run(FlowWorker(config,settings,db).run())
 
 
-if __name__=='__main__':main()
+def cli():
+    try:main()
+    except (KeyboardInterrupt,asyncio.CancelledError):pass
+    except Exception as exc:
+        # Startup/configuration exceptions can embed environment values.
+        import sys
+        print(f'Flow startup failed ({type(exc).__name__}); check protected configuration',file=sys.stderr)
+        raise SystemExit(1) from None
+
+
+if __name__=='__main__':cli()
