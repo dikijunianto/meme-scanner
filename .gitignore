@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 config/.env
 config/flow.env
+config/provider-benchmark.env
 data/
 logs/
 research/
