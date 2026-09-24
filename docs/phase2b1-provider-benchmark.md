@@ -211,3 +211,33 @@ made zero Alchemy requests. The private result file on the VPS is
 `/tmp/provider-benchmark-round3.json` (0600); it contains no endpoint URL or
 credential. Keep production routing unchanged until a later run captures and
 verifies a live curve trade.
+
+## Round 4 dynamic curve proof
+
+`scripts/provider_benchmark_round4.py` reads only the local main and flow
+databases every seven seconds. It ranks recent locally observed curve trades,
+new active flow targets, and recent ungraduated Pons launches, then adds each
+curve address to both Validation Cloud and PublicNode WSS. Initial selection
+is limited to eight curves; at most 32 are active. Once full, replacements are
+batched no more than every 30 seconds to bound subscription and HTTP costs.
+The one graduated V4/hook control comes from local flow history; the output
+marks whether it was still actively tracked.
+
+Each curve's verified range begins at **Validation HTTP head + 1**, obtained
+only after both WSS subscriptions acknowledge. Before a synchronized removal,
+its range ends at **Validation HTTP head - 1**. Notifications outside those
+per-address intervals are excluded from both providers and HTTP comparison.
+Post-window HTTP queries use an address array for every interval sharing the
+same active curve set, `CurveBuy`/`CurveSell` as a topic OR, and bounded
+2,000-block pages that shrink only after a provider range rejection. V4 and
+hook controls use one combined address/topic filter, then their exact
+individual filters classify returned logs. Transient HTTP retries remain
+bounded by the Round 3 helper. Any unresolved WSS disconnect disqualifies a
+provider from passing.
+
+The 20–60 minute VPS run uses only the private
+`config/provider-benchmark.env` for Validation credentials. Its mode-0600
+result is `/tmp/provider-benchmark-round4.json`. A full curve pass requires
+at least one HTTP-verified buy, one sell, five curve events total, and zero
+missing or unexpected live events for every occurring class. A class with
+zero expected logs is `UNPROVEN_NO_EVENTS`.
