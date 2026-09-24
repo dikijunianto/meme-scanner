@@ -4,6 +4,7 @@ __pycache__/
 config/.env
 config/flow.env
 config/provider-benchmark.env
+config/flow-rpc.env
 data/
 logs/
 research/

@@ -34,7 +34,7 @@ def inspect(db,token):
             'concentration_semantics':'early acquisition flow concentration; not holder concentration'}
 
 
-def usage(db,settings,hours=24,now=None):
+def usage(db,settings,hours=24,now=None,providers=None):
     if hours<=0:raise ValueError('Hours must be positive')
     now=time.time() if now is None else now;since=now-hours*3600
     c=db.conn
@@ -43,6 +43,12 @@ def usage(db,settings,hours=24,now=None):
                    'flow_eth_getTransactionReceipt','flow_ws_bytes','flow_duplicate_events','flow_removed_events','flow_subscription_reconnects',
                    'flow_curve_buy_events','flow_curve_sell_events','flow_v4_swap_events','flow_hook_fee_events'):
         counters.setdefault(metric,0)
+    for name in ('publicnode','validation','alchemy'):
+        for stem in ('flow_http_calls_','flow_eth_getLogs_','flow_ws_bytes_','flow_wss_connections_',
+                     'flow_provider_connection_errors_','flow_provider_reconnects_'):
+            counters.setdefault(stem+name,0)
+    for stem in ('flow_provider_failovers','flow_provider_failbacks'):
+        counters.setdefault(stem,0)
     targets=c.execute('SELECT count(*),coalesce(sum(cohort_initial),0),coalesce(sum(cohort_long),0) FROM flow_tracking_targets WHERE created_at>=?',(since,)).fetchone()
     status=dict(c.execute('SELECT status,count(*) FROM flow_tracking_targets GROUP BY status'))
     events=dict(c.execute('SELECT phase,count(*) FROM flow_events WHERE observed_at>=? AND removed=0 GROUP BY phase',(since,)))
@@ -58,7 +64,10 @@ def usage(db,settings,hours=24,now=None):
         growth['inferred_projection_bytes']={str(d):rate*86400*d if rate is not None else None for d in (7,30,90)}
     day=int(now)//86400*86400
     budgets={k:{'used':db.used(m,day),'limit':v,'pct':round(100*db.used(m,day)/v,2)} for k,m,v in
-             [('rpc_members','flow_rpc_members',settings.daily_calls),('getLogs','flow_eth_getLogs',settings.daily_getlogs),('ws_bytes','flow_ws_bytes',settings.daily_ws_bytes)]}
+             [('rpc_members','flow_rpc_members',settings.daily_calls),('getLogs','flow_eth_getLogs',settings.daily_getlogs)]}
+    secondary_bytes=sum(db.used('flow_ws_bytes_'+name,day) for name in ('publicnode','validation'))
+    budgets['ws_bytes']={'used':secondary_bytes,'limit':settings.daily_ws_bytes,
+                         'pct':round(100*secondary_bytes/settings.daily_ws_bytes,2)}
     oldest=c.execute("SELECT min(tracking_start_at) FROM flow_tracking_targets WHERE status IN ('scheduled','active_curve','active_v4')").fetchone()[0]
     counters.update(flow_targets_active=sum(status.get(k,0) for k in ('active_curve','active_v4')),
                     flow_targets_partial=status.get('partial',0),flow_complete_windows=coverage.get('complete',0),
@@ -72,6 +81,25 @@ def usage(db,settings,hours=24,now=None):
             'subscriptions_peak':samples[3],'curve_subscriptions_peak':samples[4],'v4_subscriptions_peak':samples[5],'hook_subscriptions_peak':samples[6],
             'metrics':counters,'budget_utilization_utc_day':budgets,'db_growth':growth,'oldest_active_tracking_start':oldest,
             'phase2b_coverage_start_at':db.state('phase2b_coverage_start_at'),'service_status':db.state('service_status'),
+            'routing':{'current_wss_provider':db.state('current_wss_provider'),
+                       'wss_primary_provider':'publicnode' if providers else None,
+                       'wss_fallback_provider':'validation' if providers else None,
+                       'http_provider':'validation' if providers else None,
+                       'fingerprints':providers.fingerprints() if providers else None,
+                       'failovers':counters['flow_provider_failovers'],'failbacks':counters['flow_provider_failbacks'],
+                       'connection_errors':{name:counters['flow_provider_connection_errors_'+name] for name in ('publicnode','validation','alchemy')},
+                       'reconnects':{name:counters['flow_provider_reconnects_'+name] for name in ('publicnode','validation','alchemy')},
+                       'http_calls':{name:counters['flow_http_calls_'+name] for name in ('publicnode','validation','alchemy')},
+                       'getLogs_calls':{name:counters['flow_eth_getLogs_'+name] for name in ('publicnode','validation','alchemy')},
+                       'wss_connections':{name:counters['flow_wss_connections_'+name] for name in ('publicnode','validation','alchemy')},
+                       'wss_bytes':{name:counters['flow_ws_bytes_'+name] for name in ('publicnode','validation','alchemy')},
+                       'secondary_ws_daily_cap':settings.daily_ws_bytes,
+                       'secondary_ws_daily_utilization':budgets['ws_bytes'],
+                       'flow_alchemy_http_requests':counters['flow_http_calls_alchemy'],
+                       'flow_alchemy_wss_connections':counters['flow_wss_connections_alchemy'],
+                       'flow_alchemy_wss_bytes':counters['flow_ws_bytes_alchemy'],
+                       'budget_pause_reason':db.state('budget_pause_reason'),
+                       'budget_pause_provider':db.state('budget_pause_provider')},
             'billing':'local counters only; no provider billing or remaining-quota data',
             'sample_note':'30-second gauges; projections include allocated DB/WAL overhead, not raw bytes/event'}
 

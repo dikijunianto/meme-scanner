@@ -9,6 +9,7 @@ import re
 import subprocess
 from datetime import datetime,timezone
 from urllib.parse import urlsplit
+from dotenv import dotenv_values
 from app.config import Config,ROOT
 from app.flow_data import FlowDB
 from app.flow_reports import readonly
@@ -23,15 +24,23 @@ def fingerprint(url):
 
 
 def journal_counts(since):
-    pattern=re.compile(r'(?:https?|wss?)://[^\s"<>]+/v2/[A-Za-z0-9_-]{12,}|[?&](?:api_key|apikey|key|token)=[A-Za-z0-9_-]{12,}',re.I)
+    pattern=re.compile(r'(?:https?|wss?)://[^\s"<>]+/(?:v1|v2)/[A-Za-z0-9_/-]{12,}|[?&](?:api_key|apikey|key|token)=[A-Za-z0-9_-]{12,}',re.I)
+    fragments={}
+    for label,path,names in (
+        ('validation',ROOT/'config/flow-rpc.env',('FLOW_RPC_HTTP','FLOW_RPC_WS_FALLBACK')),
+        ('benchmark',ROOT/'config/provider-benchmark.env',('BENCH_VALIDATION_HTTP','BENCH_VALIDATION_WS'))):
+        if path.is_file():
+            env=dotenv_values(path,interpolate=False)
+            fragments[label]={part for name in names for part in urlsplit(env.get(name) or '').path.split('/') if len(part)>=12}
     result={}
     for unit in ('meme-scanner','meme-scanner-flow'):
         p=subprocess.run(['journalctl','-u',unit,'--since',since,'--no-pager','-o','json'],capture_output=True,text=True,check=True)
         rows=[json.loads(line) for line in p.stdout.splitlines() if line.strip()]
-        matches=[];auth=0;client_info=0;traceback_urls=0
+        matches=[];auth=0;client_info=0;traceback_urls=0;credential_fragments={name:0 for name in fragments}
         for row in rows:
             msg=row.get('MESSAGE','')
             if not isinstance(msg,str):continue
+            for name,parts in fragments.items():credential_fragments[name]+=any(part in msg for part in parts)
             if pattern.search(msg):
                 matches.append(int(row['__REALTIME_TIMESTAMP'])/1e6)
                 client_info+=bool(re.search(r'INFO.*HTTP Request|httpcore.*INFO',msg))
@@ -39,6 +48,7 @@ def journal_counts(since):
             auth+=bool(re.search(r'\bHTTP (401|403)\b|unauthorized|invalid api key|authentication fail',msg,re.I))
         result[unit]={'credential_url_matches':len(matches),'auth_error_patterns':auth,
                       'client_info_url_records':client_info,'traceback_url_records':traceback_urls,
+                      'credential_fragment_matches':credential_fragments,
                       'first_match_utc':datetime.fromtimestamp(min(matches),timezone.utc).isoformat() if matches else None,
                       'last_match_utc':datetime.fromtimestamp(max(matches),timezone.utc).isoformat() if matches else None}
     return result
@@ -61,7 +71,8 @@ def status(since):
         services[unit]=dict(line.split('=',1) for line in raw.splitlines())
     secret_path=Path(os.environ.get('SCANNER_ENV',ROOT/'config/.env'))
     flow_path=Path(os.environ.get('FLOW_ENV',ROOT/'config/flow.env'))
-    paths=list(dict.fromkeys([secret_path.parent,secret_path,flow_path.parent,flow_path]))
+    flow_rpc_path=Path(os.environ.get('FLOW_RPC_ENV',ROOT/'config/flow-rpc.env'))
+    paths=list(dict.fromkeys([secret_path.parent,secret_path,flow_path.parent,flow_path]+([flow_rpc_path] if flow_rpc_path.exists() else [])))
     return {'as_of':datetime.now(timezone.utc).isoformat(),'offline_config_validation':'passed','rpc_calls':0,
             'endpoints':endpoints,'chain_id':config.chain_id,'flow_enabled':settings.enabled,'services':services,
             'flow_limits':{name:getattr(settings,name) for name in ('daily_calls','minute_calls','daily_getlogs','daily_ws_bytes','max_subscriptions','recovery_blocks')},

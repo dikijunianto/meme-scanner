@@ -1,3 +1,4 @@
+import asyncio
 import copy
 from decimal import Decimal
 import json
@@ -13,6 +14,7 @@ from eth_utils import keccak
 from app.config import Config
 from app.flow_data import FlowDB, decode_event, BUY, SELL, SWAP, HOOK, iso
 from app.flow_worker import FlowWorker, FlowSettings, FlowRpc, FlowBudget, HeaderCache, eligible_launches
+from app.flow_providers import FlowProviders
 from app.flow_reports import outcome, usage, inspect
 from app.rpc import Rpc, RpcError, LogRangeError, RetryableRpcError, RetriesExhausted
 
@@ -177,7 +179,10 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.tmp=tempfile.TemporaryDirectory();self.path=Path(self.tmp.name)
         self.main=main_schema(self.path/'main.db');self.db=FlowDB(self.path/'flow.db');self.db.migrate()
         self.config=Config('https://example.invalid',4663,(),'',self.path/'main.db',self.path/'log',retry_base=.001,retry_max=.001)
-        self.settings=FlowSettings(database=self.path/'flow.db');self.worker=FlowWorker(self.config,self.settings,self.db)
+        self.settings=FlowSettings(database=self.path/'flow.db')
+        self.providers=FlowProviders('https://mainnet.robinhood.validationcloud.io/v1/test',
+                                     'wss://mainnet.robinhood.validationcloud.io/v1/test')
+        self.worker=FlowWorker(self.config,self.settings,self.db,self.providers)
         self.t=insert_target(self.db,target());self.db.set_state('phase2b_coverage_start_at',900)
 
     async def asyncTearDown(self):
@@ -297,6 +302,69 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(FlowBudget):await self.worker.read_socket()
         self.assertGreater(self.db.used('flow_ws_bytes',0),20)
         self.assertEqual(self.main.execute('SELECT count(*) FROM launches').fetchone()[0],0)
+
+    async def test_provider_split_is_explicit_and_main_config_untouched(self):
+        self.assertEqual(self.config.rpc_http,'https://example.invalid')
+        self.assertEqual(self.worker.rpc.config.rpc_http,self.providers.http)
+        self.assertEqual(self.worker.rpc.config.fallback_http,'')
+        self.assertEqual(self.worker.providers.ws('publicnode'),'wss://robinhood-rpc.publicnode.com')
+        self.assertEqual(self.worker.providers.ws('validation'),self.providers.ws_fallback)
+        self.assertEqual(self.worker.ws_provider,'publicnode')
+
+    async def test_http_provider_counters_at_send_boundary(self):
+        with patch.object(Rpc,'_send',AsyncMock(return_value={'result':[]})):
+            await self.worker.rpc._send({'method':'eth_getLogs'},'eth_getLogs')
+        self.assertEqual(self.db.used('flow_http_calls_validation',0),1)
+        self.assertEqual(self.db.used('flow_eth_getLogs_validation',0),1)
+        self.assertEqual(self.db.used('flow_http_calls_alchemy',0),0)
+
+    async def test_secondary_budget_ignores_legacy_eight_mb_counter(self):
+        self.db.count('flow_ws_bytes',8_000_001)
+        self.assertEqual(self.worker.secondary_ws_bytes(0),0)
+        self.db.count('flow_ws_bytes_publicnode',63_999_999)
+        self.assertLess(self.worker.secondary_ws_bytes(0),self.settings.daily_ws_bytes)
+        self.db.count('flow_ws_bytes_validation',1)
+        self.assertEqual(self.worker.secondary_ws_bytes(0),self.settings.daily_ws_bytes)
+
+    async def test_primary_failure_fails_over_without_alchemy(self):
+        seen=[]
+        class FailedConnect:
+            async def __aenter__(self):raise OSError('TEST_SECRET_MUST_NOT_APPEAR')
+            async def __aexit__(self,*args):pass
+        def fail(url,**kwargs):
+            seen.append(url)
+            if len(seen)==3:raise asyncio.CancelledError
+            return FailedConnect()
+        self.worker.pressure=lambda:None
+        with patch('app.flow_worker.connect',side_effect=fail),patch('app.flow_worker.asyncio.sleep',AsyncMock()):
+            with self.assertRaises(asyncio.CancelledError):await self.worker.run()
+        self.assertEqual(seen,[self.providers.ws_primary,self.providers.ws_primary,self.providers.ws_fallback])
+        self.assertEqual(self.db.used('flow_provider_failovers',0),1)
+        self.assertEqual(self.db.used('flow_wss_connections_alchemy',0),0)
+
+    async def test_fallback_restores_subscription_and_reconciles_gap(self):
+        self.worker.ws_provider='validation'
+        self.db.set_state('connected_once',1)
+        self.db.set_state('last_connected_block',self.t['launch_block'])
+        self.db.gap(1,1000,1100,'ws_gap',self.t['launch_block'])
+        self.worker.command=AsyncMock(return_value='validation-sub')
+        self.worker.discover=AsyncMock()
+        self.worker.rpc.call=AsyncMock(return_value=hex(self.t['launch_block']+2))
+        self.worker.recover=AsyncMock(return_value=True)
+        with patch('app.flow_worker.time.time',return_value=1100):await self.worker.reconcile()
+        self.assertEqual(self.worker.subscriptions[(1,'curve')],'validation-sub')
+        self.assertEqual(self.worker.command.call_args.args[1][1],self.worker.filters(self.t)['curve'])
+        self.assertEqual(self.worker.recover.call_args.args[1],self.t['launch_block'])
+        self.assertEqual(self.db.conn.execute("SELECT resolved FROM flow_gaps WHERE reason='ws_gap'").fetchone()[0],1)
+
+    async def test_usage_preserves_legacy_fields_and_exposes_routing(self):
+        self.db.set_state('current_wss_provider','publicnode')
+        self.db.count('flow_ws_bytes_publicnode',123)
+        report=usage(self.db,self.settings,now=time.time(),providers=self.providers)
+        self.assertIn('flow_ws_bytes',report['metrics'])
+        self.assertEqual(report['routing']['wss_bytes']['publicnode'],123)
+        self.assertEqual(report['routing']['flow_alchemy_http_requests'],0)
+        self.assertEqual(report['routing']['secondary_ws_daily_cap'],64_000_000)
 
     async def test_bounded_reconnect_does_not_clear_older_gap(self):
         self.db.gap(1,1000,1050,'ws_gap',1)

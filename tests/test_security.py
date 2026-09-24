@@ -18,6 +18,7 @@ from install_rpc_credential import install,InstallationError,failure_reason
 from app.config import Config
 from app.flow_data import FlowDB
 from app.flow_worker import FlowSettings,FlowWorker,main as flow_main,cli as flow_cli
+from app.flow_providers import FlowProviders
 from app.heads import HeadFeed
 from app.main import setup_logging
 from app.rpc import Rpc,RpcError
@@ -76,11 +77,13 @@ class SecurityTests(unittest.IsolatedAsyncioTestCase):
     async def test_flow_websocket_failure_does_not_expose_url(self):
         self.configure_flow();sqlite3.connect(self.config.database).close()
         db=FlowDB(self.root/'flow.db');db.migrate();settings=FlowSettings(database=self.root/'flow.db')
-        worker=FlowWorker(self.config,settings,db)
+        worker=FlowWorker(self.config,settings,db,FlowProviders(
+            'https://mainnet.robinhood.validationcloud.io/v1/test',
+            'wss://mainnet.robinhood.validationcloud.io/v1/test'))
         try:
             with patch('app.flow_worker.connect',side_effect=OSError(WS)),patch('app.flow_worker.asyncio.sleep',AsyncMock(side_effect=asyncio.CancelledError)):
                 with self.assertRaises(asyncio.CancelledError):await worker.run()
-            self.clean();self.assertIn('Flow disconnected error=OSError',self.stream.getvalue())
+            self.clean();self.assertIn('Flow disconnected provider=publicnode error=OSError',self.stream.getvalue())
         finally:db.conn.close()
 
     def test_flow_startup_exception_hides_environment_values(self):

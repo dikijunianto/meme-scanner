@@ -14,6 +14,7 @@ from eth_utils import keccak
 from eth_abi.exceptions import DecodingError
 
 from app.config import Config, ROOT
+from app.flow_providers import FlowProviders, provider
 from app.flow_data import FlowDB, BUY, SELL, SWAP, HOOK, decode_event, stamp, iso, WINDOWS
 from app.rpc import Rpc, RpcError, LogRangeError, retry_delay
 
@@ -29,7 +30,7 @@ class FlowSettings:
     minute_calls: int=12
     daily_getlogs: int=400
     recovery_blocks: int=100
-    daily_ws_bytes: int=8_000_000
+    daily_ws_bytes: int=64_000_000
 
     @classmethod
     def load(cls):
@@ -44,7 +45,7 @@ class FlowSettings:
         result=cls(enabled=='true',Path(env.get('FLOW_DATABASE') or ROOT/'data/flow.db'))
         for attr,key,maximum in [('max_subscriptions','FLOW_MAX_ACTIVE_SUBSCRIPTIONS',128),('daily_calls','FLOW_MAX_HTTP_CALLS_PER_DAY',5000),
             ('minute_calls','FLOW_MAX_HTTP_CALLS_PER_MINUTE',30),('daily_getlogs','FLOW_MAX_RECOVERY_GETLOGS_PER_DAY',2000),
-            ('recovery_blocks','FLOW_RECOVERY_MAX_BLOCKS',1000),('daily_ws_bytes','FLOW_MAX_WS_BYTES_PER_DAY',8_000_000)]:
+            ('recovery_blocks','FLOW_RECOVERY_MAX_BLOCKS',1000),('daily_ws_bytes','FLOW_SECONDARY_WS_BYTES_PER_DAY',64_000_000)]:
             value=int(env.get(key) or getattr(result,attr))
             if not 1<=value<=maximum:raise ValueError('Unsafe '+key)
             setattr(result,attr,value)
@@ -56,8 +57,8 @@ class FlowBudget(RpcError):
 
 
 class FlowRpc(Rpc):
-    def __init__(self,config,settings,db):
-        super().__init__(replace(config,rpc_rps=.5,retry_attempts=3))
+    def __init__(self,config,settings,db,providers):
+        super().__init__(replace(config,rpc_http=providers.http,rpc_ws='',fallback_http='',rpc_rps=.5,retry_attempts=3))
         self.settings,self.db=settings,db
         self.telemetry=self
 
@@ -71,8 +72,14 @@ class FlowRpc(Rpc):
         if (self.db.used('flow_rpc_members',day)+n>self.settings.daily_calls or
             self.db.used('flow_rpc_members',minute)+n>self.settings.minute_calls or
             self.db.used('flow_eth_getLogs',day)+getlogs>self.settings.daily_getlogs):
+            self.db.set_state('budget_pause_provider',provider(self.config.rpc_http))
+            self.db.set_state('budget_pause_reason','http_calls_or_getlogs')
             self.db.count('flow_budget_pauses');raise FlowBudget('Phase 2B HTTP budget exhausted')
-        # Count attempts before I/O, including failed attempts and retries.
+        # Count attempts at the actual client boundary, including failed attempts and retries.
+        routed=provider(self.config.rpc_http)
+        self.db.count('flow_http_calls_'+routed)
+        self.db.count('flow_rpc_members_'+routed,n)
+        if getlogs:self.db.count('flow_eth_getLogs_'+routed,getlogs)
         self.db.count('flow_rpc_members',n);self.db.count('flow_http_calls')
         for member in members:self.db.count('flow_'+member['method'])
         return await super()._send(payload,method)
@@ -99,15 +106,16 @@ def eligible_launches(main,now):
 
 
 class FlowWorker:
-    def __init__(self,config,settings,db):
-        self.config,self.settings,self.db=config,settings,db
+    def __init__(self,config,settings,db,providers):
+        self.config,self.settings,self.db,self.providers=config,settings,db,providers
         self.main=sqlite3.connect(config.database.resolve().as_uri()+'?mode=ro',uri=True,timeout=2)
         self.main.row_factory=sqlite3.Row
-        self.rpc=FlowRpc(config,settings,db)
+        self.rpc=FlowRpc(config,settings,db,providers)
         self.headers=HeaderCache();self.socket=None;self.reader=None;self.pending={};self.sequence=0
         self.subscriptions={};self.routes={};self.queue=asyncio.Queue(maxsize=2048)
         self.connected=False;self.latest_block=0;self.last_tick=0;self.dirty=set()
         self.next_command=0
+        self.ws_provider='publicnode'
 
     def pressure(self):
         # Degrade flow first, leaving the base service's settings untouched.
@@ -127,7 +135,8 @@ class FlowWorker:
         async for raw in self.socket:
             size=len(raw.encode() if isinstance(raw,str) else raw)
             self.db.count('flow_ws_bytes',size)
-            if self.db.used('flow_ws_bytes',int(time.time())//86400*86400)>=self.settings.daily_ws_bytes:
+            self.db.count('flow_ws_bytes_'+self.ws_provider,size)
+            if self.secondary_ws_bytes(int(time.time())//86400*86400)>=self.settings.daily_ws_bytes:
                 raise FlowBudget('Phase 2B WS byte budget exhausted')
             message=json.loads(raw)
             if 'id' in message:
@@ -138,6 +147,9 @@ class FlowWorker:
                 # route at queue-drain time after the ack has been processed.
                 self.queue.put_nowait(message['params'])
             else:raise RpcError('Unexpected WS message')
+
+    def secondary_ws_bytes(self,day):
+        return sum(self.db.used('flow_ws_bytes_'+name,day) for name in ('publicnode','validation'))
 
     async def command(self,method,params):
         loop=asyncio.get_running_loop()
@@ -353,15 +365,22 @@ class FlowWorker:
                 pressure=self.pressure()
                 if pressure:
                     self.db.set_state('service_status','paused_'+pressure);self.finalize(False);await asyncio.sleep(60);continue
-                if self.db.used('flow_ws_bytes',day)>=self.settings.daily_ws_bytes:
-                    self.db.set_state('service_status','paused_ws_budget');self.finalize(False);await asyncio.sleep(60);continue
+                if self.secondary_ws_bytes(day)>=self.settings.daily_ws_bytes:
+                    self.db.set_state('service_status','paused_ws_budget')
+                    self.db.set_state('budget_pause_provider',self.ws_provider)
+                    self.db.set_state('budget_pause_reason','secondary_ws_bytes')
+                    self.finalize(False);await asyncio.sleep(60);continue
                 try:
-                    async with connect(self.config.rpc_ws,open_timeout=20,ping_interval=20,ping_timeout=20,
+                    routed=provider(self.providers.ws(self.ws_provider))
+                    self.db.count('flow_wss_connections_'+routed)
+                    async with connect(self.providers.ws(self.ws_provider),open_timeout=20,ping_interval=20,ping_timeout=20,
                                        max_size=65536,max_queue=4,compression=None) as self.socket:
                         self.reader=asyncio.create_task(self.read_socket());self.subscriptions={};self.routes={}
                         if await self.command('eth_chainId',[])!=hex(self.config.chain_id):raise RpcError('Wrong WS chain')
-                        self.connected=True;self.db.set_state('service_status','connected');started=time.time()
+                        self.connected=True;self.db.set_state('service_status','connected')
+                        self.db.set_state('current_wss_provider',routed);started=time.time()
                         if self.db.state('connected_once'):self.db.count('flow_subscription_reconnects')
+                        if self.db.state('connected_once'):self.db.count('flow_provider_reconnects_'+routed)
                         self.db.set_state('connected_once',1)
                         while True:
                             if self.pressure():raise FlowBudget('Phase 2B resource reserve reached')
@@ -377,13 +396,19 @@ class FlowWorker:
                             await asyncio.sleep(2)
                 except asyncio.CancelledError:raise
                 except Exception as exc:
-                    failures+=1;log.warning('Flow disconnected error=%s attempts=%d',type(exc).__name__,failures)
+                    failures+=1
+                    self.db.count('flow_provider_connection_errors_'+self.ws_provider)
+                    log.warning('Flow disconnected provider=%s error=%s attempts=%d',self.ws_provider,type(exc).__name__,failures)
                     now=time.time()
                     for t in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')"):
                         self.db.gap(t['launch_id'],t['coverage_end_at'] or t['tracking_start_at'],min(now,t['tracking_end_at']),
                                     'provider_budget' if isinstance(exc,FlowBudget) else 'ws_gap',int(self.db.state('last_connected_block',0)))
                         self.dirty.add(t['launch_id'])
                     self.db.set_state('service_status','disconnected');self.finalize(False)
+                    if self.ws_provider=='publicnode' and failures>=2:
+                        self.ws_provider='validation';self.db.count('flow_provider_failovers')
+                        failures=1
+                        log.warning('Flow failover to Validation WSS; HTTP gap recovery required')
                     await asyncio.sleep(min(60,retry_delay(self.config,min(failures,6))))
                 finally:
                     self.connected=False
@@ -407,11 +432,12 @@ def main():
     if not settings.enabled:
         log.info('Phase 2B disabled; no database or network activity');return
     config=Config.load()
+    providers=FlowProviders.load()
     if settings.database.resolve()==config.database.resolve():raise ValueError('Flow database must be separate from the main database')
     db=FlowDB(settings.database)
     # Migration is an explicit deployment step, never a side effect of starting service.
     if db.state('schema_version')!='1':raise ValueError('Run SQLite-safe flow initialization first')
-    asyncio.run(FlowWorker(config,settings,db).run())
+    asyncio.run(FlowWorker(config,settings,db,providers).run())
 
 
 def cli():

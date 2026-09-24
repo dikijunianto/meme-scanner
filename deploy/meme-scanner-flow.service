@@ -12,6 +12,7 @@ WorkingDirectory=/opt/meme-scanner
 ExecStart=/opt/meme-scanner/.venv/bin/python -m app.flow_worker
 Environment=PYTHONUNBUFFERED=1
 Environment=FLOW_ENV=/opt/meme-scanner/config/flow.env
+Environment=FLOW_RPC_ENV=/opt/meme-scanner/config/flow-rpc.env
 UMask=0077
 Restart=on-failure
 RestartSec=30
