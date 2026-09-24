@@ -158,3 +158,33 @@ Machine-readable credential-free results remain under `/tmp` on the VPS:
 and `provider-benchmark-latency.json`. This report is the reviewed summary;
 no secret-bearing benchmark artifact is committed. Production routing remains
 unchanged. No Phase 2C work was started.
+
+## Round 3 concurrent completeness check
+
+`scripts/provider_benchmark_round3.py` runs PublicNode and Validation Cloud
+WebSocket subscriptions at the same time. It freezes up to five currently
+active curve addresses and one real graduated V4/hook pool from the read-only
+flow database before either subscription starts. Both providers receive the
+same address/topic filters. The comparison uses the shared interior block
+range after both subscriptions are ready and before either is stopped, so
+boundary notifications do not create false misses. Validation Cloud HTTP
+queries those exact filters over every block in that range after the live
+window. Each `eth_getLogs` request covers at most 100 blocks, shrinks on
+provider range rejection, and has bounded retries for transient failures.
+
+Run from `/opt/meme-scanner` on the VPS with the private
+`config/provider-benchmark.env` already installed:
+
+```sh
+.venv/bin/python scripts/provider_benchmark_round3.py --min-minutes 20 --max-minutes 60
+```
+
+The only network targets are PublicNode WSS and Validation Cloud WSS/HTTP.
+The script does not load production RPC credentials or change systemd,
+production configuration, or either database. It writes a mode-0600 result
+to `/tmp/provider-benchmark-round3.json` with endpoint fingerprints, never
+credential URLs. A curve pass requires at least one canonical curve event in
+the complete Validation HTTP block range, 100% live match, no extra logs,
+and no invalidating subscription evidence. If the range has no curve event,
+the result is `NO_CURVE_EVENT_OBSERVED` and the gate remains
+`MORE_BENCHMARK_REQUIRED` even when all zero-event classes match.
