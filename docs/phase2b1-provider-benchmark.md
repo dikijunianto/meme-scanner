@@ -201,7 +201,8 @@ seven hook events. Each WSS provider delivered the same 15 canonical events:
 or wrong-filter notifications, and zero disconnects/reconnects. Validation WSS
 received 14,483 bytes; PublicNode WSS received 14,502 bytes.
 
-No curve trade occurred in the entire verified block interval, so both
+No curve trade occurred for the selected addresses in the verified block
+interval, so both
 providers are classified `*_WSS_PASS_CURVE_UNPROVEN`; the overall gate is
 `MORE_BENCHMARK_REQUIRED`. This demonstrates observed V4/hook completeness
 for this frozen cohort, not curve delivery. No production routing changed,
