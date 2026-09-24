@@ -188,3 +188,25 @@ the complete Validation HTTP block range, 100% live match, no extra logs,
 and no invalidating subscription evidence. If the range has no curve event,
 the result is `NO_CURVE_EVENT_OBSERVED` and the gate remains
 `MORE_BENCHMARK_REQUIRED` even when all zero-event classes match.
+
+### Round 3 result, 2026-09-24 UTC
+
+The shared live window ran 03:18:32.935–04:18:32.938 UTC (3600.003 seconds)
+over interior blocks 71043527–71079042. It froze four active curve addresses
+and one graduated V4/hook pool into three filters. Validation HTTP completed
+all 1,068 bounded `eth_getLogs` requests without error or range reduction.
+Its expected counts were zero CurveBuy, zero CurveSell, eight V4 swaps, and
+seven hook events. Each WSS provider delivered the same 15 canonical events:
+8/8 V4 and 7/7 hook, zero missing, zero extra, zero duplicates, zero malformed
+or wrong-filter notifications, and zero disconnects/reconnects. Validation WSS
+received 14,483 bytes; PublicNode WSS received 14,502 bytes.
+
+No curve trade occurred in the entire verified block interval, so both
+providers are classified `*_WSS_PASS_CURVE_UNPROVEN`; the overall gate is
+`MORE_BENCHMARK_REQUIRED`. This demonstrates observed V4/hook completeness
+for this frozen cohort, not curve delivery. No production routing changed,
+no service restarted, both DB integrity checks passed, and the benchmark
+made zero Alchemy requests. The private result file on the VPS is
+`/tmp/provider-benchmark-round3.json` (0600); it contains no endpoint URL or
+credential. Keep production routing unchanged until a later run captures and
+verifies a live curve trade.
