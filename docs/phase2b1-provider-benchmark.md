@@ -241,3 +241,36 @@ result is `/tmp/provider-benchmark-round4.json`. A full curve pass requires
 at least one HTTP-verified buy, one sell, five curve events total, and zero
 missing or unexpected live events for every occurring class. A class with
 zero expected logs is `UNPROVEN_NO_EVENTS`.
+
+### Round 4 result, 2026-09-24 UTC
+
+The full run covered 15:32:47.581–15:53:27.190 UTC (1239.609 seconds).
+The benchmark discovered 243 local curve candidates, subscribed 154 distinct
+curves through 154 synchronized intervals, and never exceeded 32 active curves
+or 34 provider subscriptions including V4/hook control. Selection reasons:
+1 recent local trade, 3 new active flow targets, 150 recent launches, and
+0 fallback. Both providers acknowledged every dynamic add; no synchronized
+add failed. Every curve's HTTP comparison began at its recorded post-ACK
+activation block.
+
+Validation HTTP completed 79 post-window `eth_getLogs` calls across 73
+dynamic curve segments. A provisional pre-stop check made another 79 calls;
+total benchmark `eth_getLogs` calls were 158, versus 1,068 in Round 3.
+There were zero retries, range reductions, provider errors, and failed
+queries. HTTP expected 770 CurveBuy and 933 CurveSell events. Validation WSS
+and PublicNode WSS each delivered all 1,703 canonical events with zero missing
+or extra identities, duplicates, malformed or wrong-filter notifications,
+disconnects, or reconnects. The historic V4/hook control produced no events,
+so those two classes remain `UNPROVEN_NO_EVENTS` in Round 4; Round 3's
+positive V4/hook evidence remains separate.
+
+Validation WSS received 1,726,936 bytes; PublicNode WSS received 1,729,057
+bytes. Both WSS providers passed the buy/sell proof against complete
+Validation HTTP ground truth, and the gate was `PROVIDER_SPLIT_READY`.
+The benchmark made zero Alchemy requests. Production main and flow retained
+their PIDs and zero restart counts, both databases passed integrity checks,
+and production routing stayed unchanged. The private result is
+`/tmp/provider-benchmark-round4.json` on the VPS (0600, no credential URLs).
+This is a provider capability proof for deliberately activity-biased local
+targets, not an unbiased market sample or authorization to change production
+routing.
