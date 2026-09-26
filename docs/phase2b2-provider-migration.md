@@ -62,6 +62,12 @@ connected and active subscriptions have been acknowledged, run `ready-tail`.
 It captures `H_live`, reconciles `H_stop+1..H_live`, and deduplicates against WSS.
 Any unresolved range yields `ROLLBACK_REQUIRED`. The script does not stop or
 start services, edit configuration, or deliberately induce provider failover.
+The ready-tail promotion resolves only recovery gaps whose complete per-filter
+block intervals are proved by all three durable stages. It then publishes a
+connection-bound handoff marker; the subscribed worker accepts this marker
+instead of replaying those same ranges against a later moving head. Older or
+unproved gaps remain unresolved. A failed or interrupted promotion publishes
+no handoff marker.
 
 After both tails are verified, observe at least 30 minutes. Require the new
 flow process to report zero Alchemy HTTP requests, WSS connections, and WSS

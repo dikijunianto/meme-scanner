@@ -223,7 +223,6 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(gap=gap):
                 plan=self.worker.recovery_plan(self.t,base+gap)
                 self.assertEqual((plan[0][4],plan[0][5]),(base,base+gap))
-                self.assertEqual(self.worker.check_recovery_budget(plan),(gap//10)+1)
         for gap in (100,101,354,355,2001):
             with self.assertRaises(FlowBudget):self.worker.recovery_plan(self.t,base+gap)
         self.db.set_state('recovery:1:curve',base+94)
@@ -251,7 +250,6 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         plans=self.worker.recovery_plan(self.db.target(1),base+30)
         self.assertEqual({p[1]:(p[4],p[5]) for p in plans},
                          {'curve':(base,base+20),'v4':(base+20,base+30),'hook':(base+20,base+30)})
-        self.assertEqual(self.worker.check_recovery_budget(plans),7)
         self.db.set_state('recovery:1:curve',base+30)
         self.assertEqual({p[1] for p in self.worker.recovery_plan(self.db.target(1),base+30)}, {'v4','hook'})
         self.db.set_state('recovery:1:curve',base+33)
@@ -284,20 +282,16 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+10))
         self.assertEqual(self.db.state('recovery:1:curve'),str(base+10))
 
-    async def test_recovery_budget_fails_before_logs_and_after_range_rejection(self):
-        base=self.t['launch_block'];self.settings.daily_getlogs=4
-        self.worker.rpc.call=AsyncMock(return_value=[])
-        with self.assertRaises(FlowBudget):
-            await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+20))
-        self.worker.rpc.call.assert_not_called()
-        async def reject(method,args):
-            self.db.count('flow_eth_getLogs')
-            raise LogRangeError('range')
-        self.worker.rpc.call=AsyncMock(side_effect=reject)
-        with self.assertRaises(FlowBudget):
-            await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+9))
-        self.assertEqual(self.worker.rpc.call.await_count,1)
-        self.assertIsNone(self.db.state('recovery:1:curve'))
+    async def test_recovery_budget_keeps_completed_chunks_without_false_calls(self):
+        base=self.t['launch_block'];self.settings.daily_getlogs=1
+        async def answer(rpc,payload,method):
+            return {'jsonrpc':'2.0','id':payload['id'],'result':[]}
+        with patch.object(Rpc,'_send',answer) as send:
+            with self.assertRaises(FlowBudget) as raised:
+                await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+20))
+        self.assertEqual(raised.exception.scope,'daily_getlogs')
+        self.assertEqual(self.db.state('recovery:1:curve'),str(base+9))
+        self.assertEqual(self.db.used('flow_eth_getLogs',0),1)
 
     async def test_crash_after_event_commit_replays_without_second_row(self):
         base=self.t['launch_block'];e=event(self.t)
@@ -383,6 +377,145 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.used('flow_rpc_members',0),1)
         with self.assertRaises(sqlite3.OperationalError):self.worker.main.execute('DELETE FROM launches')
         self.assertEqual(self.main.execute('PRAGMA integrity_check').fetchone()[0],'ok')
+
+    async def test_minute_rejection_is_not_sent_and_next_bucket_succeeds(self):
+        minute=1_790_000_000//60*60
+        self.db.count('flow_rpc_members',12,now=minute)
+        with patch.object(Rpc,'_send',AsyncMock(return_value={} )) as sent:
+            with patch('app.flow_worker.time.time',return_value=minute+2):
+                with self.assertRaises(FlowBudget) as caught:
+                    await self.worker.rpc._send({'method':'eth_blockNumber'},'eth_blockNumber')
+            self.assertEqual((caught.exception.scope,caught.exception.used,caught.exception.limit),('minute_rpc',12,12))
+            self.assertEqual(caught.exception.category,'TEMPORARY_BUDGET_WAIT')
+            sent.assert_not_awaited()
+            self.assertEqual(self.db.used('flow_rpc_members',minute),12)
+            with patch('app.flow_worker.time.time',return_value=minute+60):
+                await self.worker.rpc._send({'method':'eth_blockNumber'},'eth_blockNumber')
+            sent.assert_awaited_once()
+
+    async def test_daily_rpc_and_getlogs_rejections_are_distinct(self):
+        day=1_790_000_000//86400*86400
+        with patch.object(Rpc,'_send',AsyncMock(return_value={} )) as sent:
+            self.settings.daily_calls=1
+            self.db.count('flow_rpc_members',1,now=day)
+            with patch('app.flow_worker.time.time',return_value=day+60):
+                with self.assertRaises(FlowBudget) as caught:
+                    await self.worker.rpc._send({'method':'eth_blockNumber'},'eth_blockNumber')
+            self.assertEqual(caught.exception.scope,'daily_rpc')
+            self.settings.daily_calls=1000;self.settings.daily_getlogs=1
+            self.db.count('flow_eth_getLogs',1,now=day)
+            with patch('app.flow_worker.time.time',return_value=day+60):
+                with self.assertRaises(FlowBudget) as caught:
+                    await self.worker.rpc._send({'method':'eth_getLogs'},'eth_getLogs')
+            self.assertEqual(caught.exception.scope,'daily_getlogs')
+            sent.assert_not_awaited()
+            with patch('app.flow_worker.time.time',return_value=day+86400):
+                await self.worker.rpc._send({'method':'eth_getLogs'},'eth_getLogs')
+            sent.assert_awaited_once()
+
+    async def test_envelope_pacing_waits_without_consuming_extra_members(self):
+        with patch.object(self.worker.rpc,'_send',AsyncMock(return_value={})) as sent:
+            start=asyncio.get_running_loop().time()
+            await self.worker.rpc.request({'method':'eth_blockNumber'},'eth_blockNumber')
+            await self.worker.rpc.request({'method':'eth_blockNumber'},'eth_blockNumber')
+        self.assertGreaterEqual(asyncio.get_running_loop().time()-start,1.9)
+        self.assertEqual(sent.await_count,2)
+
+    async def test_minute_wait_resumes_fixed_head_without_busy_retry(self):
+        base=self.t['launch_block'];calls=0
+        self.worker.command=AsyncMock(return_value='sub');self.worker.discover=AsyncMock()
+        async def rpc(method,args):
+            nonlocal calls
+            if method=='eth_blockNumber':
+                calls+=1
+                if calls==1:raise FlowBudget('minute_rpc',12,12,1200)
+                return hex(base+3)
+            return []
+        self.worker.rpc.call=AsyncMock(side_effect=rpc)
+        with patch('app.flow_worker.time.time',return_value=1150):
+            with self.assertRaises(FlowBudget) as caught:await self.worker.reconcile()
+            self.worker.defer_recovery(caught.exception)
+        self.assertEqual(self.db.state('service_status'),'temporary_budget_wait')
+        self.assertEqual(self.db.state('recovery_rejection_scope'),'minute_rpc')
+        with patch('app.flow_worker.time.time',return_value=1190):await self.worker.reconcile()
+        self.assertEqual(calls,1)
+        with patch('app.flow_worker.time.time',return_value=1201):await self.worker.reconcile()
+        self.assertEqual(calls,2)
+        self.assertEqual(self.db.state('recovery:1:curve'),str(base+3))
+        self.assertEqual(self.db.state('service_status'),'connected')
+
+    async def test_provider_error_waits_without_dropping_wss_subscription(self):
+        base=self.t['launch_block'];calls=0
+        self.worker.command=AsyncMock(return_value='sub');self.worker.discover=AsyncMock()
+        async def rpc(method,args):
+            nonlocal calls
+            if method=='eth_blockNumber':
+                calls+=1
+                if calls==1:raise RpcError('offline')
+                return hex(base)
+            return []
+        self.worker.rpc.call=AsyncMock(side_effect=rpc)
+        with patch('app.flow_worker.time.time',return_value=1100):await self.worker.reconcile()
+        self.assertEqual(self.db.state('service_status'),'provider_error')
+        self.assertIn((1,'curve'),self.worker.subscriptions)
+        with patch('app.flow_worker.time.time',return_value=1110):await self.worker.reconcile()
+        self.assertEqual(calls,1)
+        with patch('app.flow_worker.time.time',return_value=1116):await self.worker.reconcile()
+        self.assertEqual(calls,2)
+        self.assertEqual(self.db.state('service_status'),'connected')
+
+    async def test_structured_budget_log_does_not_expose_endpoint(self):
+        with self.assertLogs('app.flow_worker',level='WARNING') as captured:
+            self.worker.defer_recovery(FlowBudget('minute_rpc',12,12,time.time()+60))
+        line=' '.join(captured.output)
+        self.assertIn('budget_scope=minute_rpc used=12 limit=12',line)
+        self.assertNotIn('validationcloud.io',line)
+        self.assertNotIn('example.invalid',line)
+
+    async def test_oversized_target_does_not_starve_younger_target(self):
+        base=self.t['launch_block'];newer=target(launch=2);newer['launch_block']=base+110
+        newer['token_address']='0x'+'02'*20;newer['curve_address']='0x'+'03'*20
+        insert_target(self.db,newer)
+        self.worker.command=AsyncMock(side_effect=['old','new']);self.worker.discover=AsyncMock()
+        self.worker.rpc.call=AsyncMock(side_effect=lambda method,args:hex(base+120) if method=='eth_blockNumber' else [])
+        with patch('app.flow_worker.time.time',return_value=1100):await self.worker.reconcile()
+        self.assertEqual(self.db.state('recovery:1:curve'),None)
+        self.assertEqual(self.db.state('recovery:2:curve'),str(base+120))
+        self.assertEqual(self.db.state('recovery_rejection_scope'),'recovery_range')
+        self.assertEqual(self.db.conn.execute("SELECT count(*) FROM flow_gaps WHERE launch_id=1 AND resolved=0").fetchone()[0],1)
+        self.worker.rpc.call.reset_mock()
+        with patch('app.flow_worker.time.time',return_value=1102):await self.worker.reconcile()
+        self.worker.rpc.call.assert_not_awaited()
+
+    async def test_verified_recovery_releases_feature_finalization(self):
+        base=self.t['launch_block']
+        self.db.gap(1,1000,1050,'ws_gap',base)
+        self.worker.ingest(self.t,event(self.t))
+        self.worker.command=AsyncMock(return_value='sub');self.worker.discover=AsyncMock()
+        self.worker.rpc.call=AsyncMock(side_effect=lambda method,args:hex(base) if method=='eth_blockNumber' else [])
+        with patch('app.flow_worker.time.time',return_value=1100):await self.worker.reconcile()
+        self.assertEqual(self.db.conn.execute("SELECT resolved FROM flow_gaps WHERE reason='ws_gap'").fetchone()[0],1)
+        with patch('app.flow_worker.time.time',return_value=1500):self.worker.finalize(True)
+        self.assertGreater(self.db.conn.execute('SELECT count(*) FROM flow_features').fetchone()[0],0)
+        self.assertGreater(self.db.conn.execute("SELECT count(*) FROM flow_features WHERE coverage_quality='complete'").fetchone()[0],0)
+
+    async def test_legacy_route_uses_alchemy_without_transactions(self):
+        legacy=FlowSettings(database=self.path/'flow.db',split_enabled=False)
+        config=Config('https://robinhood-mainnet.g.alchemy.com/v2/test',4663,(),
+                      'wss://robinhood-mainnet.g.alchemy.com/v2/test',self.path/'main.db',self.path/'log')
+        worker=FlowWorker(config,legacy,self.db,self.providers)
+        try:
+            self.assertEqual(worker.ws_url(),config.rpc_ws)
+            self.assertEqual(worker.rpc.config.rpc_http,config.rpc_http)
+            self.assertNotIn('eth_getTransactionReceipt',Rpc.ALLOWED)
+            self.assertNotIn('eth_getTransactionByHash',Rpc.ALLOWED)
+            with patch.object(Rpc,'_send',AsyncMock(return_value={})):
+                await worker.rpc._send({'method':'eth_blockNumber'},'eth_blockNumber')
+            self.assertEqual(self.db.used('flow_http_calls_alchemy',0),1)
+            self.assertEqual(self.db.used('flow_http_calls_unknown',0),0)
+            self.assertEqual(self.db.used('flow_http_calls_validation',0),0)
+        finally:
+            await worker.rpc.close();worker.main.close()
 
     async def test_rate_limit_retries_bounded_and_all_counted(self):
         with patch.object(Rpc,'_send',AsyncMock(side_effect=RetryableRpcError('HTTP 429'))),patch('app.rpc.asyncio.sleep',AsyncMock()):
@@ -492,7 +625,7 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report['routing']['secondary_ws_daily_cap'],64_000_000)
 
     async def test_full_replay_resolves_old_global_anchor_gap(self):
-        self.db.gap(1,1000,1050,'ws_gap',1)
+        self.db.gap(1,1000,1050,'ws_gap',self.t['launch_block'])
         self.db.set_state('last_connected_block',self.t['launch_block'])
         self.worker.command=AsyncMock(return_value='sub');self.worker.discover=AsyncMock()
         self.worker.rpc.call=AsyncMock(side_effect=lambda method,args:hex(self.t['launch_block']) if method=='eth_blockNumber' else [])

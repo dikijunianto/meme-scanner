@@ -134,16 +134,23 @@ class ShadowReconciler:
             end = min(head, graduation['block_number']) if graduation and kind == 'curve' else head
             yield kind, query, start, end
 
+    def historical_start(self,target,kind,base,head):
+        cursor=self.db.state(f'recovery:{target["launch_id"]}:{kind}')
+        if cursor is not None and int(cursor)>head+2:
+            raise RpcError('Persisted recovery cursor exceeds validated head')
+        start=max(base,int(cursor)-2) if cursor is not None else base
+        gap=self.db.conn.execute('''SELECT min(first_block) FROM flow_gaps WHERE launch_id=? AND resolved=0
+          AND reason IN ('ws_gap','reconnect_recovery_incomplete') AND first_block IS NOT NULL''',
+          (target['launch_id'],)).fetchone()[0]
+        return min(start,max(base,gap)) if gap is not None else start
+
     def add_jobs(self, stage, first, head):
         targets = [dict(row) for row in self.db.conn.execute(
             "SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial') ORDER BY launch_id")]
         with self.db.conn:
             for target in targets:
                 for kind, _, base, end in self.periods(target, head):
-                    cursor=self.db.state(f'recovery:{target["launch_id"]}:{kind}') if stage=='historical' else None
-                    if cursor is not None and int(cursor)>head+2:
-                        raise RpcError('Persisted recovery cursor exceeds validated head')
-                    start = max(first, base, int(cursor)-2) if cursor is not None else max(first,base)
+                    start=max(first,self.historical_start(target,kind,base,head)) if stage=='historical' else max(first,base)
                     self.db.conn.execute('''INSERT OR IGNORE INTO flow_shadow_jobs
                       (stage,launch_id,kind,original_safe_start,reconciliation_upper_bound,
                        next_unverified_block,highest_contiguous_verified_block,completion_status)
@@ -180,10 +187,7 @@ class ShadowReconciler:
                                       completion_status='pending' WHERE stage='historical' AND launch_id=? AND kind=?''',
                                       (end,target['launch_id'],kind))
                             else:
-                                cursor=self.db.state(f'recovery:{target["launch_id"]}:{kind}')
-                                if cursor is not None and int(cursor)>newer+2:
-                                    raise RpcError('Persisted recovery cursor exceeds validated head')
-                                start=max(base,int(cursor)-2) if cursor is not None else base
+                                start=self.historical_start(target,kind,base,newer)
                                 self.db.conn.execute('''INSERT INTO flow_shadow_jobs
                                   (stage,launch_id,kind,original_safe_start,reconciliation_upper_bound,
                                    next_unverified_block,highest_contiguous_verified_block,completion_status)
@@ -325,6 +329,36 @@ class ShadowReconciler:
                     self.db.conn.execute('''INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key)
                       DO UPDATE SET value=max(cast(value AS INTEGER),cast(excluded.value AS INTEGER))''',
                                          (f'recovery:{job["launch_id"]}:{job["kind"]}',str(job['highest_contiguous_verified_block'])))
+            if stage=='wss_ready_tail':
+                if not self.complete('historical') or not self.complete('stop_tail'):
+                    raise RpcError('Shadow handoff has incomplete prior stage')
+                head=int(self.meta('H_live'));at=int(self.meta('H_live_at'))
+                for (launch,) in self.db.conn.execute("SELECT DISTINCT launch_id FROM flow_shadow_jobs WHERE stage='wss_ready_tail'"):
+                    target=self.db.target(launch)
+                    if not target:continue
+                    gaps=self.db.conn.execute('''SELECT id,first_block,end_at FROM flow_gaps WHERE launch_id=?
+                      AND resolved=0 AND reason IN ('ws_gap','reconnect_recovery_incomplete')''',(launch,)).fetchall()
+                    for gap in gaps:
+                        first=gap['first_block']
+                        if first is None or gap['end_at']>at or first>head:continue
+                        proved=True
+                        for kind,_,base,end in self.periods(target,head):
+                            start=max(first,base)
+                            if start>end:continue
+                            covered=start-1
+                            ranges=self.db.conn.execute('''SELECT original_safe_start,highest_contiguous_verified_block
+                              FROM flow_shadow_jobs WHERE launch_id=? AND kind=? AND completion_status='complete'
+                              AND stage IN ('historical','stop_tail','wss_ready_tail') ORDER BY original_safe_start''',
+                              (launch,kind)).fetchall()
+                            for low,high in ranges:
+                                if low<=covered+1:covered=max(covered,high)
+                            if covered<end:proved=False;break
+                        if proved:self.db.conn.execute('UPDATE flow_gaps SET resolved=1 WHERE id=?',(gap['id'],))
+                    outstanding=self.db.conn.execute('''SELECT 1 FROM flow_gaps WHERE launch_id=? AND resolved=0
+                      AND reason IN ('ws_gap','reconnect_recovery_incomplete') LIMIT 1''',(launch,)).fetchone()
+                    if not outstanding:
+                        self.db.conn.execute('''INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key)
+                          DO UPDATE SET value=excluded.value''',(f'flow_shadow_handoff:{launch}',f'{head}:{at}'))
 
 
 def make_reconciler(config, settings, db, providers):

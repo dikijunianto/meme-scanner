@@ -105,6 +105,13 @@ class ShadowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([j['original_safe_start'] for j in jobs[1:]],
                          [max(self.base,head-gap-2) for gap in (0,1,9,10,50,99,100,354)])
 
+    async def test_unresolved_gap_widens_shadow_start_before_runtime_cursor(self):
+        self.db.set_state('recovery:1:curve',self.base+100)
+        self.db.gap(1,1000,1010,'ws_gap',self.base+5)
+        self.mock_rpc(self.base+110)
+        await self.runner.start_historical()
+        self.assertEqual(self.runner.summary('historical')['jobs'][0]['original_safe_start'],self.base+5)
+
     async def test_rate_limit_retry_is_counted_per_actual_send(self):
         attempts=0
         async def answer(rpc,payload,method):
@@ -221,6 +228,8 @@ class ShadowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.state('recovery:1:curve'),str(self.base+8))
         self.runner.add_jobs('wss_ready_tail',self.base+9,self.base+10)
         self.assertTrue(await self.runner.run_stage('wss_ready_tail'))
+        self.runner.set_meta('H_live',self.base+10)
+        self.runner.set_meta('H_live_at',int(__import__('time').time()))
         self.runner.promote('wss_ready_tail')
         self.assertEqual(self.db.state('recovery:1:curve'),str(self.base+10))
 
@@ -233,6 +242,45 @@ class ShadowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.runner.run_stage('historical'))
         self.assertEqual(self.runner.summary('historical')['blocks_verified'],13)
         self.assertEqual(self.runner.meta('H_prefetch'),str(self.base+12))
+
+    async def test_proved_gap_handoff_resolves_and_stops_redundant_recovery(self):
+        self.mock_rpc(self.base+10)
+        self.runner.set_meta('H_prefetch',self.base+5)
+        self.runner.add_jobs('historical',0,self.base+5)
+        self.assertTrue(await self.runner.run_stage('historical'))
+        self.runner.add_jobs('stop_tail',self.base+6,self.base+8)
+        self.assertTrue(await self.runner.run_stage('stop_tail'))
+        self.runner.add_jobs('wss_ready_tail',self.base+9,self.base+10)
+        self.assertTrue(await self.runner.run_stage('wss_ready_tail'))
+        self.db.gap(1,1000,1001,'ws_gap',self.base+1)
+        now=int(__import__('time').time())
+        self.runner.set_meta('H_live',self.base+10);self.runner.set_meta('H_live_at',now)
+        self.runner.promote('wss_ready_tail')
+        self.assertEqual(self.db.conn.execute('SELECT resolved FROM flow_gaps').fetchone()[0],1)
+        self.assertEqual(self.db.state('flow_shadow_handoff:1'),f'{self.base+10}:{now}')
+        worker=self.runner.worker;worker.connection_started_at=now-5
+        worker.subscriptions[(1,'curve')]='ack';worker.pending_recovery.add(1)
+        self.assertTrue(worker.accept_shadow_handoff(self.db.target(1)))
+        self.assertNotIn(1,worker.pending_recovery)
+
+    async def test_interrupted_or_unproved_handoff_keeps_gap(self):
+        self.mock_rpc(self.base+10)
+        self.db.set_state('recovery:1:curve',self.base+4)
+        self.runner.set_meta('H_prefetch',self.base+5)
+        self.runner.add_jobs('historical',0,self.base+5)
+        self.assertTrue(await self.runner.run_stage('historical'))
+        self.runner.add_jobs('stop_tail',self.base+6,self.base+8)
+        self.assertTrue(await self.runner.run_stage('stop_tail'))
+        self.runner.add_jobs('wss_ready_tail',self.base+9,self.base+10)
+        self.db.gap(1,1000,1001,'ws_gap',self.base+1)
+        self.runner.set_meta('H_live',self.base+10)
+        self.runner.set_meta('H_live_at',int(__import__('time').time()))
+        with self.assertRaises(RpcError):self.runner.promote('wss_ready_tail')
+        self.assertEqual(self.db.conn.execute('SELECT resolved FROM flow_gaps').fetchone()[0],0)
+        self.assertTrue(await self.runner.run_stage('wss_ready_tail'))
+        self.runner.promote('wss_ready_tail')
+        self.assertEqual(self.db.conn.execute('SELECT resolved FROM flow_gaps').fetchone()[0],0)
+        self.assertIsNone(self.db.state('flow_shadow_handoff:1'))
 
 
 class ProvenanceTests(unittest.TestCase):

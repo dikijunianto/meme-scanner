@@ -115,6 +115,7 @@ async def operate(mode):
             if not sample or sample[0]<1:raise RpcError('Active WSS subscriptions are not acknowledged')
             head=int(await runner.worker.rpc.call('eth_blockNumber',[]),16)
             runner.set_meta('H_live',head)
+            runner.set_meta('H_live_at',int(time.time()))
             runner.add_jobs('wss_ready_tail',int(runner.meta('H_stop'))+1,head)
             complete=await runner.run_stage('wss_ready_tail')
             if complete:runner.promote('wss_ready_tail')

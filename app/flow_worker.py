@@ -60,7 +60,13 @@ class FlowSettings:
 
 
 class FlowBudget(RpcError):
-    pass
+    def __init__(self, scope, used=None, limit=None, reset_at=None, first_block=None):
+        self.scope,self.used,self.limit,self.reset_at,self.first_block=scope,used,limit,reset_at,first_block
+        self.category=('UNRECOVERABLE_GAP' if scope=='recovery_range' else
+                       'TEMPORARY_BUDGET_WAIT' if scope=='minute_rpc' else
+                       'DAILY_BUDGET_EXHAUSTED' if scope in ('daily_rpc','daily_getlogs') else
+                       'RESOURCE_LIMIT')
+        super().__init__(scope)
 
 
 class FlowRpc(Rpc):
@@ -77,19 +83,30 @@ class FlowRpc(Rpc):
         members=payload if isinstance(payload,list) else [payload]
         now=int(time.time());day=now//86400*86400;minute=now//60*60
         n=len(members);getlogs=sum(m['method']=='eth_getLogs' for m in members)
-        if (self.db.used('flow_rpc_members',day)+n>self.settings.daily_calls or
-            self.db.used('flow_rpc_members',minute)+n>self.settings.minute_calls or
-            self.db.used('flow_eth_getLogs',day)+getlogs>self.settings.daily_getlogs):
-            self.db.set_state('budget_pause_provider',provider(self.config.rpc_http))
-            self.db.set_state('budget_pause_reason','http_calls_or_getlogs')
-            self.db.count('flow_budget_pauses');raise FlowBudget('Phase 2B HTTP budget exhausted')
-        # Count attempts at the actual client boundary, including failed attempts and retries.
         routed=provider(self.config.rpc_http)
-        self.db.count('flow_http_calls_'+routed)
-        self.db.count('flow_rpc_members_'+routed,n)
-        if getlogs:self.db.count('flow_eth_getLogs_'+routed,getlogs)
-        self.db.count('flow_rpc_members',n);self.db.count('flow_http_calls')
-        for member in members:self.db.count('flow_'+member['method'])
+        # Serialize with the shadow process. Rejected-before-send calls count as zero.
+        self.db.conn.execute('BEGIN IMMEDIATE')
+        try:
+            for scope,used,needed,limit,reset in (
+                ('daily_rpc',self.db.used('flow_rpc_members',day),n,self.settings.daily_calls,day+86400),
+                ('daily_getlogs',self.db.used('flow_eth_getLogs',day),getlogs,self.settings.daily_getlogs,day+86400),
+                ('minute_rpc',self.db.used('flow_rpc_members',minute),n,self.settings.minute_calls,minute+60)):
+                if used+needed>limit:raise FlowBudget(scope,used,limit,reset)
+            metrics=[('flow_http_calls_'+routed,1),('flow_rpc_members_'+routed,n),
+                     ('flow_rpc_members',n),('flow_http_calls',1)]
+            if getlogs:metrics += [('flow_eth_getLogs_'+routed,getlogs)]
+            metrics += [('flow_'+member['method'],1) for member in members]
+            for name,count in metrics:
+                self.db.conn.execute('''INSERT INTO flow_usage VALUES(?,?,?) ON CONFLICT(minute,metric)
+                  DO UPDATE SET count=count+excluded.count''',(minute,name,count))
+            self.db.conn.commit()
+        except BaseException as exc:
+            self.db.conn.rollback()
+            if isinstance(exc,FlowBudget):
+                self.db.set_state('budget_pause_provider',routed)
+                self.db.set_state('budget_pause_reason',exc.scope)
+                self.db.count('flow_budget_rejections')
+            raise
         return await super()._send(payload,method)
 
 
@@ -125,6 +142,7 @@ class FlowWorker:
         self.next_command=0
         self.ws_provider='publicnode' if settings.split_enabled else 'alchemy'
         self.pending_recovery=set()
+        self.recovery_heads={};self.blocked_recovery={};self.recovery_wait_until=0;self.connection_started_at=0
 
     # A global observed block is not a safe cursor for individual log filters.
     # These cursors advance only after a complete, committed HTTP range.
@@ -146,33 +164,19 @@ class FlowWorker:
             if kind=='curve' and g and persisted is not None and int(persisted)>=end:continue
             start=max(bases[kind],int(persisted)-2) if persisted is not None else bases[kind]
             if end>=start:
-                if end-start+1>RECOVERY_MAX_BLOCKS:raise FlowBudget('Phase 2B recovery range exceeds bound')
+                if end-start+1>RECOVERY_MAX_BLOCKS:raise FlowBudget('recovery_range',end-start+1,RECOVERY_MAX_BLOCKS,first_block=start)
                 plans.append((t,kind,query,key,start,end))
         return plans
 
-    def check_recovery_budget(self,plans,span=RECOVERY_CHUNK_BLOCKS):
-        day=int(time.time())//86400*86400
-        calls=sum((end-start)//span+1 for _,_,_,_,start,end in plans)
-        reserved=calls*self.rpc.config.retry_attempts
-        if (self.db.used('flow_eth_getLogs',day)+reserved>self.settings.daily_getlogs or
-            self.db.used('flow_rpc_members',day)+reserved>self.settings.daily_calls):
-            raise FlowBudget('Phase 2B recovery plan exceeds remaining HTTP budget')
-        return calls
-
     async def recover_plans(self,plans):
-        self.check_recovery_budget(plans)
-        for index,(t,kind,query,key,first,last) in enumerate(plans):
+        for t,kind,query,key,first,last in plans:
             g=json.loads(t['graduation_json']) if t['graduation_json'] else None
             boundary=(g['block_number'],g['log_index']) if g else None
             current=first;span=RECOVERY_CHUNK_BLOCKS
             while current<=last:
-                # A provider range rejection changes the remaining call estimate.
-                remainder=[(t,kind,query,key,current,last),*plans[index+1:]]
-                self.check_recovery_budget(remainder,span)
                 minute=int(time.time())//60*60
                 if self.db.used('flow_rpc_members',minute)>=self.settings.minute_calls:
-                    await asyncio.sleep(60-time.time()%60+.05)
-                    continue
+                    raise FlowBudget('minute_rpc',self.settings.minute_calls,self.settings.minute_calls,minute+60)
                 end=min(last,current+span-1)
                 try:rows=await self.rpc.call('eth_getLogs',[dict(query,fromBlock=hex(current),toBlock=hex(end))])
                 except LogRangeError:
@@ -256,6 +260,35 @@ class FlowWorker:
                     'hook':{'address':g['hooks'],'topics':[HOOK,g['pool_id']]}}
         return {'curve':{'address':t['curve_address'],'topics':[[BUY,SELL]]}}
 
+    def recovery_fingerprint(self,t):
+        return tuple((kind,self.db.state(f'recovery:{t["launch_id"]}:{kind}')) for kind in sorted(self.filters(t)))
+
+    def accept_shadow_handoff(self,t):
+        marker=self.db.state(f'flow_shadow_handoff:{t["launch_id"]}')
+        if not marker:return False
+        head,at=map(int,marker.split(':'))
+        if not self.connection_started_at<=at<=time.time():return False
+        if any((t['launch_id'],kind) not in self.subscriptions for kind in self.filters(t)):return False
+        if any(int(self.db.state(f'recovery:{t["launch_id"]}:{kind}',-1))<head for kind in self.filters(t)):
+            return False
+        self.pending_recovery.discard(t['launch_id']);self.recovery_heads.pop(t['launch_id'],None)
+        self.blocked_recovery.pop(t['launch_id'],None);self.db.count('flow_shadow_handoffs_accepted')
+        return True
+
+    def recovery_gap(self,t,first=None):
+        exists=self.db.conn.execute("SELECT 1 FROM flow_gaps WHERE launch_id=? AND reason='reconnect_recovery_incomplete' AND resolved=0 LIMIT 1",(t['launch_id'],)).fetchone()
+        if not exists:self.db.gap(t['launch_id'],t['last_event_at'] or t['tracking_start_at'],time.time(),
+                                  'reconnect_recovery_incomplete',first if first is not None else t['launch_block'])
+
+    def defer_recovery(self,exc):
+        if exc.reset_at:self.recovery_wait_until=max(self.recovery_wait_until,exc.reset_at)
+        self.db.set_state('service_status',exc.category.lower())
+        self.db.set_state('recovery_rejection_scope',exc.scope)
+        self.db.count('flow_budget_pauses')
+        log.warning('Flow recovery deferred budget_scope=%s used=%s limit=%s '
+                    'retry_after_seconds=%s category=%s',exc.scope,exc.used,exc.limit,
+                    max(0,int(exc.reset_at-time.time())) if exc.reset_at else None,exc.category)
+
     async def subscribe(self,t):
         new=[]
         desired=self.filters(t)
@@ -334,6 +367,8 @@ class FlowWorker:
         now=time.time()
         # Expiry is independent of HTTP availability or discovery success.
         for t in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE tracking_end_at+10<? AND status NOT IN ('completed','partial')",(now,)).fetchall():
+            self.pending_recovery.discard(t['launch_id']);self.recovery_heads.pop(t['launch_id'],None)
+            self.blocked_recovery.pop(t['launch_id'],None)
             for key,sub in list(self.subscriptions.items()):
                 if key[0]==t['launch_id']:
                     await self.command('eth_unsubscribe',[sub]);del self.subscriptions[key]
@@ -358,28 +393,69 @@ class FlowWorker:
                 self.db.count('flow_budget_pauses');continue
             if new or t['launch_id'] in self.pending_recovery:
                 self.pending_recovery.add(t['launch_id'])
+                if new:
+                    self.recovery_heads.pop(t['launch_id'],None)
+                    self.blocked_recovery.pop(t['launch_id'],None)
                 recovery.append(t)
         if recovery:
+            recovery=[t for t in recovery if not self.accept_shadow_handoff(t)]
+        if recovery and time.time()<self.recovery_wait_until:return
+        if recovery:
             try:
-                # One validated upper bound prevents later targets chasing a moving head.
-                last=int(await self.rpc.call('eth_blockNumber',[]),16)
-                self.latest_block=max(self.latest_block,last)
-                plans=[plan for t in recovery for plan in self.recovery_plan(t,last)]
-                await self.recover_plans(plans)
-            except RpcError as exc:
-                log.warning('Flow recovery incomplete error=%s',type(exc).__name__)
-                for t in recovery:
-                    exists=self.db.conn.execute("SELECT 1 FROM flow_gaps WHERE launch_id=? AND reason='reconnect_recovery_incomplete' AND resolved=0 LIMIT 1",(t['launch_id'],)).fetchone()
-                    if not exists:self.db.gap(t['launch_id'],t['last_event_at'] or t['tracking_start_at'],time.time(),'reconnect_recovery_incomplete',t['launch_block'])
+                if any(t['launch_id'] not in self.recovery_heads for t in recovery):
+                    # Pin a head once; retries cannot chase a moving chain.
+                    last=int(await self.rpc.call('eth_blockNumber',[]),16)
+                    self.latest_block=max(self.latest_block,last)
+                    for t in recovery:self.recovery_heads.setdefault(t['launch_id'],last)
+            except FlowBudget:
                 raise
-            with self.db.conn:
-                for t in recovery:
+            except RpcError as exc:
+                log.warning('Flow recovery head failed error=%s',type(exc).__name__)
+                for t in recovery:self.recovery_gap(t)
+                self.recovery_wait_until=max(self.recovery_wait_until,time.time()+15)
+                self.db.set_state('service_status','provider_error')
+                self.db.set_state('recovery_rejection_scope','provider_error')
+                return
+            for t in recovery:
+                launch=t['launch_id']
+                fingerprint=self.recovery_fingerprint(t)
+                if self.blocked_recovery.get(launch)==fingerprint:continue
+                try:
+                    last=self.recovery_heads[launch]
+                    plans=self.recovery_plan(t,last)
+                    await self.recover_plans(plans)
+                except FlowBudget as exc:
+                    self.recovery_gap(t,exc.first_block)
+                    if exc.category=='UNRECOVERABLE_GAP':
+                        self.blocked_recovery[launch]=fingerprint
+                        self.db.set_state('recovery_rejection_scope',exc.scope)
+                        self.db.set_state('service_status','unrecoverable_gap')
+                        log.warning('Flow recovery blocked budget_scope=%s used=%s limit=%s category=%s',
+                                    exc.scope,exc.used,exc.limit,exc.category)
+                        continue
+                    raise
+                except RpcError as exc:
+                    self.recovery_gap(t)
+                    log.warning('Flow recovery provider error=%s',type(exc).__name__)
+                    self.recovery_wait_until=max(self.recovery_wait_until,time.time()+15)
+                    self.db.set_state('service_status','provider_error')
+                    self.db.set_state('recovery_rejection_scope','provider_error')
+                    continue
+                with self.db.conn:
                     self.db.conn.execute('UPDATE flow_tracking_targets SET coverage_start_at=coalesce(coverage_start_at,?),status=?,updated_at=? WHERE launch_id=?',
-                        (t['tracking_start_at'],'active_v4' if t['graduation_json'] else 'active_curve',time.time(),t['launch_id']))
-                    self.db.conn.execute("UPDATE flow_gaps SET resolved=1 WHERE launch_id=? AND reason IN ('ws_gap','reconnect_recovery_incomplete') AND (first_block IS NULL OR first_block<=?)",
-                        (t['launch_id'],last))
-                    self.pending_recovery.discard(t['launch_id'])
-                    self.dirty.add(t['launch_id'])
+                        (t['tracking_start_at'],'active_v4' if t['graduation_json'] else 'active_curve',time.time(),launch))
+                    # Only the exact queried suffix is proved; older gaps remain visible.
+                    if plans:
+                        first=min(p[4] for p in plans)
+                        self.db.conn.execute("""UPDATE flow_gaps SET resolved=1 WHERE launch_id=?
+                          AND reason IN ('ws_gap','reconnect_recovery_incomplete')
+                          AND first_block BETWEEN ? AND ? AND end_at<=?""",
+                          (launch,first,last,time.time()))
+                self.pending_recovery.discard(launch);self.recovery_heads.pop(launch,None)
+                self.blocked_recovery.pop(launch,None);self.dirty.add(launch)
+        if not self.pending_recovery and self.db.state('service_status') in (
+                'temporary_budget_wait','daily_budget_exhausted','unrecoverable_gap','provider_error'):
+            self.db.set_state('service_status','connected')
 
     def drain(self):
         while not self.queue.empty():
@@ -444,6 +520,7 @@ class FlowWorker:
                                        max_size=65536,max_queue=4,compression=None) as self.socket:
                         self.reader=asyncio.create_task(self.read_socket());self.subscriptions={};self.routes={}
                         if await self.command('eth_chainId',[])!=hex(self.config.chain_id):raise RpcError('Wrong WS chain')
+                        self.connection_started_at=time.time()
                         self.connected=True;self.db.set_state('service_status','connected')
                         self.db.set_state('current_wss_provider',routed);started=time.time()
                         if self.db.state('connected_once'):self.db.count('flow_subscription_reconnects')
@@ -454,8 +531,8 @@ class FlowWorker:
                             if self.reader.done():await self.reader;raise RpcError('WS closed')
                             self.drain()
                             try:await self.reconcile()
-                            except FlowBudget:
-                                self.db.set_state('service_status','connected_http_budget');self.db.count('flow_budget_pauses')
+                            except FlowBudget as exc:
+                                self.defer_recovery(exc)
                             self.drain()
                             if self.reader.done():await self.reader;raise RpcError('WS closed during recovery')
                             self.finalize(True)
