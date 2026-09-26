@@ -8,5 +8,6 @@ config/flow-rpc.env
 data/
 logs/
 research/
+rollback/
 .env*
 !.env.example

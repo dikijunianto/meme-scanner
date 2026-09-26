@@ -53,8 +53,10 @@ against the actual `H_stop`, reconciles through that head, and promotes only
 verified filter cursors. A failure yields `ROLLBACK_REQUIRED`; use the flow-only
 rollback below. Do not start the new route with an unresolved stop tail.
 
-Set `FLOW_PROVIDER_SPLIT_ENABLED=true` in protected `config/flow.env` (mode 0600)
-and start **only** `meme-scanner-flow.service`. Its primary WSS is PublicNode,
+Set `FLOW_PROVIDER_SPLIT_ENABLED=true` in protected `config/flow.env` (mode 0600),
+install the verified tree's `deploy/meme-scanner-flow.service` as the flow-only
+systemd unit, reload systemd, and start **only** `meme-scanner-flow.service`.
+Its primary WSS is PublicNode,
 fallback WSS is Validation, and HTTP recovery is Validation. Once PublicNode is
 connected and active subscriptions have been acknowledged, run `ready-tail`.
 It captures `H_live`, reconciles `H_stop+1..H_live`, and deduplicates against WSS.
