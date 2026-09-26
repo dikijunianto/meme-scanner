@@ -1,5 +1,45 @@
 # Phase 2B.2 provider split: shadow-first cutover
 
+## Durable startup handoff (Phase 2B.2.3)
+
+The failed 2026-09-26 cutover exposed a gate cycle: split WSS connected and
+subscribed, but ordinary 100-block startup recovery ran before the operator's
+Validation HTTP ready-tail. Its pinned range was 73,211,566..73,211,741
+(176 blocks), so it correctly reported `unrecoverable_gap`; the old ready-tail
+command then refused that status. The 100-block normal limit remains unchanged.
+
+Successful stop-tail now writes a durable `phase2b2_cutover_session` in the flow
+database, pinned to the migration ledger, `H_prefetch`, `H_stop`, provider roles,
+and target/filter snapshot. Its states are `STOP_TAIL_VERIFIED` →
+`SPLIT_WSS_CONNECTING` → `SUBSCRIPTIONS_READY` → `READY_TAIL_PENDING` →
+`READY_TAIL_VERIFIED` → `NORMAL_CONNECTED`. The split worker subscribes and
+stores canonical WSS events while pending, but defers ordinary startup recovery,
+cursor advancement, and feature finalization. `ready-tail` accepts only the
+exact pending session after a post-ACK subscription sample, validates the
+service-user config and provider, pins one `H_live`, and resumes durable
+Validation HTTP chunks. It commits cursor/gap proof and the verified state
+together. The worker then enters normal connected operation. A crash before
+proof resumes pending; a crash after proof observes the committed state. A
+disconnect, provider change, filter change, or new active gap fails the session
+and requires flow-only rollback. With no active cutover session, ordinary
+startup recovery is unchanged.
+
+Gap IDs 238–240 from the failed retry remain durable evidence until separately
+reconciled. Once the shared getLogs budget permits one bounded range plus three
+attempts and the 50-call reserve, run the pinned cleanup command on the clean
+deployed revision while legacy Alchemy flow remains active:
+
+```sh
+cd /opt/meme-scanner
+.venv/bin/python scripts/phase2b2_cleanup_gaps.py --gap-ids 238,239,240 --head 73212783
+```
+
+The command checks the fixed failed-cutover ledger identity, verifies the
+candidate block timestamp covers all three gap ends, queries only the missing
+Validation HTTP interval after `H_stop`, and resolves named expired-target gaps
+only when all three contiguous stages prove coverage. If the budget gate fails,
+leave services and gaps untouched. This cleanup is not a provider cutover.
+
 Production cutover remains gated. The deployable source is the clean Git checkout at
 `/opt/meme-scanner`; `/tmp/meme-scanner-phase2b2-test` is **not** deployment
 authority. `scripts/phase2b2_shadow.py` refuses a non-Git or dirty source and

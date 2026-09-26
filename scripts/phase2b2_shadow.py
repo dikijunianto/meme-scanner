@@ -10,6 +10,8 @@ import httpx
 from websockets.asyncio.client import connect
 
 from app.config import Config
+from app.flow_cutover import (gap_counts, new as new_cutover,
+                              save as save_cutover, session as cutover_session, unexpected_gap)
 from app.flow_config import prestart_check
 from app.flow_data import FlowDB
 from app.flow_providers import FlowProviders
@@ -84,6 +86,7 @@ async def operate(mode):
             prestart=await prestart_check()
             if db.conn.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RpcError('Flow database integrity failed')
             if runner.worker.main.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RpcError('Main database integrity failed')
+            if gap_counts(db)[0]:raise RpcError('Preexisting active flow gap blocks cutover')
             identities=await chain_ids(config,providers)
             head=int(await runner.worker.rpc.call('eth_blockNumber',[]),16)
             plan=runner.tail_plan(head)
@@ -98,6 +101,7 @@ async def operate(mode):
             await prestart_check(require_split=True)
             if db.conn.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RpcError('Flow database integrity failed')
             if runner.worker.main.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RpcError('Main database integrity failed')
+            if gap_counts(db)[0]:raise RpcError('New active flow gap blocks cutover')
             head=int(await runner.worker.rpc.call('eth_blockNumber',[]),16)
             plan=runner.tail_plan(head)
             if not plan['ready']:
@@ -117,32 +121,97 @@ async def operate(mode):
             if complete:
                 runner.promote('historical')
                 runner.promote('stop_tail')
+                if gap_counts(db)[0]:raise RpcError('Active flow gap appeared during stop tail')
+                targets=[]
+                for row in db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')"):
+                    target=dict(row)
+                    for kind,query,base,_ in runner.periods(target,head):
+                        targets.append({'launch_id':target['launch_id'],'kind':kind,
+                                        'base':base,'query':query})
+                cutover=new_cutover(db,int(runner.meta('H_prefetch')),head,targets)
+                runner.set_meta('cutover_session_id',cutover['id'])
             return {'revision':revision,'H_stop':head,**runner.summary('stop_tail'),
+                    'cutover_session_id':cutover['id'] if complete else None,
                     'gate':'STOP_TAIL_COMPLETE' if complete else 'ROLLBACK_REQUIRED'}
         if mode=='ready-tail':
             if flow['ActiveState']!='active' or flow['MainPID']==runner.meta('old_flow_pid'):
                 raise RpcError('New flow service is not active')
             if not runner.complete('stop_tail'):raise RpcError('Stop tail incomplete')
-            if (runner.db.state('service_status') not in ('connected','connected_http_budget') or
-                runner.db.state('current_wss_provider')!='publicnode'):
-                raise RpcError('PublicNode WSS is not confirmed ready')
-            sample=runner.db.conn.execute('SELECT subscriptions FROM flow_samples WHERE at>=? ORDER BY at DESC LIMIT 1',
-                                          (int(runner.meta('H_stop_at'))//30*30+30,)).fetchone()
-            if not sample or sample[0]<1:raise RpcError('Active WSS subscriptions are not acknowledged')
-            head=int(await runner.worker.rpc.call('eth_blockNumber',[]),16)
+            cutover=cutover_session(db)
+            if (not cutover or cutover['id']!=runner.meta('cutover_session_id') or
+                cutover['state']!='READY_TAIL_PENDING' or
+                cutover['expected']!={'wss':'publicnode','fallback_wss':'validation','http':'validation'} or
+                cutover['H_stop']!=int(runner.meta('H_stop')) or
+                not cutover['subscription_ready_at'] or
+                cutover['subscription_ready_provider']!='publicnode' or
+                runner.db.state('service_status')!='cutover_handoff_pending' or
+                runner.db.state('current_wss_provider')!='publicnode' or
+                unexpected_gap(db,cutover)):
+                raise RpcError('Exact cutover handoff is not ready')
+            await prestart_check(require_split=True)
+            active=[dict(row) for row in db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')")]
+            required=sum(1 for t in cutover['targets'] if any(t['launch_id']==a['launch_id'] for a in active))
+            for _ in range(36):
+                sample=runner.db.conn.execute('SELECT subscriptions FROM flow_samples WHERE at>=? ORDER BY at DESC LIMIT 1',
+                                              (int(cutover['subscription_ready_at'])//30*30+30,)).fetchone()
+                if sample and sample[0]>=required:break
+                await asyncio.sleep(1)
+            else:
+                raise RpcError('Required WSS subscriptions are not acknowledged')
+            latest=cutover_session(db)
+            if (not latest or latest['id']!=cutover['id'] or latest['state']!='READY_TAIL_PENDING'
+                or unexpected_gap(db,latest) or db.state('current_wss_provider')!='publicnode'):
+                raise RpcError('Cutover state changed while awaiting subscriptions')
+            cutover=latest
+            snapshot={(x['launch_id'],x['kind']):x for x in cutover['targets']}
+            for t in active:
+                for kind,query,base,_ in runner.periods(t,int(runner.meta('H_stop'))):
+                    saved=snapshot.get((t['launch_id'],kind))
+                    if not saved or saved['base']!=base or saved['query']!=query:
+                        raise RpcError('Active filter changed outside cutover snapshot')
+            head=cutover['H_live']
+            if head is None:
+                head=int(await runner.worker.rpc.call('eth_blockNumber',[]),16)
+                if head<int(runner.meta('H_stop')):raise RpcError('Validation head moved behind stop proof')
+                db.conn.execute('BEGIN IMMEDIATE')
+                try:
+                    fresh=cutover_session(db)
+                    if (fresh['id']!=cutover['id'] or fresh['state']!='READY_TAIL_PENDING' or
+                        fresh['targets']!=cutover['targets'] or fresh['H_live'] is not None):
+                        raise RpcError('Cutover session changed while pinning live head')
+                    cutover=dict(fresh,H_live=head,H_live_at=time.time())
+                    save_cutover(db,cutover)
+                    db.conn.commit()
+                except BaseException:
+                    db.conn.rollback()
+                    raise
             runner.set_meta('H_live',head)
-            runner.set_meta('H_live_at',int(time.time()))
-            runner.add_jobs('wss_ready_tail',int(runner.meta('H_stop'))+1,head)
+            runner.set_meta('H_live_at',int(cutover['H_live_at']))
+            targets={x['launch_id'] for x in cutover['targets']}
+            runner.add_jobs('wss_ready_tail',int(runner.meta('H_stop'))+1,head,targets)
+            jobs=runner.summary('wss_ready_tail')['jobs']
+            span=runner.summary('historical')['min_successful_chunk'] or 1
+            needed=sum(max(0,(j['reconciliation_upper_bound']-j['next_unverified_block'])//span+1)
+                       for j in jobs)
+            remaining=settings.daily_getlogs-db.used('flow_eth_getLogs',int(time.time())//86400*86400)
+            if remaining<needed*runner.worker.rpc.config.retry_attempts+50:
+                return {'revision':revision,'H_live':head,'remaining':remaining,
+                        'reserved_attempts':needed*runner.worker.rpc.config.retry_attempts,
+                        'gate':'ROLLBACK_REQUIRED','reason':'Ready-tail budget insufficient'}
             complete=await runner.run_stage('wss_ready_tail')
             if complete:runner.promote('wss_ready_tail')
             return {'revision':revision,'H_live':head,**runner.summary('wss_ready_tail'),
                     'gate':'READY_FOR_30_MIN_VALIDATION' if complete else 'ROLLBACK_REQUIRED'}
         if mode=='status':
+            cutover=cutover_session(db)
             return {'revision':revision,'utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),
                     'H_prefetch':runner.meta('H_prefetch'),'H_pre_stop':runner.meta('H_pre_stop'),
                     'H_stop':runner.meta('H_stop'),'H_live':runner.meta('H_live'),
                     'historical':runner.summary('historical'),'stop_tail':runner.summary('stop_tail'),
-                    'wss_ready_tail':runner.summary('wss_ready_tail')}
+                    'wss_ready_tail':runner.summary('wss_ready_tail'),
+                    'cutover_session':{k:cutover.get(k) for k in ('id','state','H_prefetch','H_stop','H_live',
+                      'subscription_ready_at','subscription_ready_provider','ready_tail_verified')}
+                      if cutover else None,'active_historical_unresolved_gaps':gap_counts(db)}
         raise ValueError('Unknown mode')
     finally:
         await runner.worker.rpc.close()

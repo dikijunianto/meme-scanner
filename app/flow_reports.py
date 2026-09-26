@@ -75,12 +75,18 @@ def usage(db,settings,hours=24,now=None,providers=None):
                     flow_recovery_gaps=c.execute('SELECT count(*) FROM flow_gaps WHERE resolved=0').fetchone()[0],
                     flow_raw_rows=c.execute('SELECT count(*) FROM flow_events').fetchone()[0],
                     flow_db_bytes=sum(p.stat().st_size for p in (db.path,db.path.with_name(db.path.name+'-wal')) if p.exists()))
+    from app.flow_cutover import gap_counts, session as cutover_session
+    active_gaps,historical_gaps=gap_counts(db)
+    cutover=cutover_session(db)
     return {'hours':hours,'as_of':iso(now),'tracked_launches':targets[0],'initial_cohort_tracked':targets[1],'long_cohort_tracked':targets[2],
             'target_status_all_time':status,'events_in_period':events,'raw_rows_all_time':c.execute('SELECT count(*) FROM flow_events').fetchone()[0],
             'coverage':coverage,'windows':windows,'active_average':samples[0],'active_peak':samples[1],'subscriptions_average':samples[2],
             'subscriptions_peak':samples[3],'curve_subscriptions_peak':samples[4],'v4_subscriptions_peak':samples[5],'hook_subscriptions_peak':samples[6],
             'metrics':counters,'budget_utilization_utc_day':budgets,'db_growth':growth,'oldest_active_tracking_start':oldest,
             'phase2b_coverage_start_at':db.state('phase2b_coverage_start_at'),'service_status':db.state('service_status'),
+            'connection_state':db.state('connection_state'),'recovery_state':db.state('recovery_state'),
+            'cutover_state':cutover['state'].lower() if cutover else None,
+            'active_unresolved_gap_count':active_gaps,'historical_unresolved_gap_count':historical_gaps,
             'routing':{'current_wss_provider':db.state('current_wss_provider'),
                        'wss_primary_provider':'publicnode' if providers else None,
                        'wss_fallback_provider':'validation' if providers else None,

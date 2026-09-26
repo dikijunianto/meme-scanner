@@ -7,6 +7,7 @@ import subprocess
 import time
 
 from app.config import ROOT
+from app.flow_cutover import save as save_cutover, session as cutover_session
 from app.flow_data import BUY, SELL
 from app.flow_providers import provider
 from app.flow_worker import FlowBudget, FlowRpc, FlowWorker
@@ -144,9 +145,14 @@ class ShadowReconciler:
           (target['launch_id'],)).fetchone()[0]
         return min(start,max(base,gap)) if gap is not None else start
 
-    def add_jobs(self, stage, first, head):
-        targets = [dict(row) for row in self.db.conn.execute(
-            "SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial') ORDER BY launch_id")]
+    def add_jobs(self, stage, first, head, target_ids=None):
+        if target_ids is None:
+            targets = [dict(row) for row in self.db.conn.execute(
+                "SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial') ORDER BY launch_id")]
+        else:
+            targets = [dict(row) for row in self.db.conn.execute(
+                f"SELECT * FROM flow_tracking_targets WHERE launch_id IN ({','.join('?' for _ in target_ids)}) ORDER BY launch_id",
+                tuple(target_ids))] if target_ids else []
         with self.db.conn:
             for target in targets:
                 for kind, _, base, end in self.periods(target, head):
@@ -381,8 +387,44 @@ class ShadowReconciler:
                 raise RpcError('Legacy flow subscriptions are not acknowledged')
         return {'resolved':resolved,'handoff_targets':handoff}
 
+    def resolve_failed_cutover_gaps(self, gap_ids, head, head_at):
+        """Close named expired-target gaps only across three contiguous verified stages."""
+        if len(set(gap_ids))!=len(gap_ids) or not self.complete('failed_cutover_cleanup_tail'):
+            raise RpcError('Failed-cutover cleanup proof is incomplete')
+        stages=('historical','stop_tail','failed_cutover_cleanup_tail')
+        with self.db.conn:
+            resolved=[]
+            for gap_id in gap_ids:
+                gap=self.db.conn.execute('''SELECT launch_id,reason,first_block,end_at,resolved
+                  FROM flow_gaps WHERE id=?''',(gap_id,)).fetchone()
+                if (not gap or gap['reason'] not in ('ws_gap','reconnect_recovery_incomplete') or
+                    gap['first_block'] is None or gap['end_at']>head_at or gap['first_block']>head):
+                    raise RpcError('Named gap is outside verified cleanup head')
+                if gap['resolved']:continue
+                target=self.db.target(gap['launch_id'])
+                if not target or target['status'] not in ('completed','partial'):
+                    raise RpcError('Failed-cutover cleanup requires an expired target')
+                jobs={r['stage']:r for r in self.db.conn.execute('''SELECT stage,original_safe_start,
+                  highest_contiguous_verified_block,completion_status FROM flow_shadow_jobs
+                  WHERE launch_id=? AND kind='curve' AND stage IN ('historical','stop_tail',
+                  'failed_cutover_cleanup_tail')''',(gap['launch_id'],))}
+                if (set(jobs)!=set(stages) or any(j['completion_status']!='complete' for j in jobs.values()) or
+                    jobs[stages[0]]['original_safe_start']>gap['first_block'] or
+                    any(jobs[a]['highest_contiguous_verified_block']+1!=jobs[b]['original_safe_start']
+                        for a,b in zip(stages,stages[1:])) or
+                    jobs[stages[-1]]['highest_contiguous_verified_block']!=head):
+                    raise RpcError('Named gap lacks contiguous range proof')
+                self.db.conn.execute('UPDATE flow_gaps SET resolved=1 WHERE id=? AND resolved=0',(gap_id,))
+                self.db.conn.execute('''INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key)
+                  DO UPDATE SET value=max(cast(value AS INTEGER),cast(excluded.value AS INTEGER))''',
+                  (f'recovery:{gap["launch_id"]}:curve',str(head)))
+                resolved.append(gap_id)
+        return resolved
+
     def promote(self, stage):
         if not self.complete(stage):raise RpcError('Cannot promote incomplete shadow stage')
+        if stage=='wss_ready_tail' and (cutover:=cutover_session(self.db)) and cutover['state']!='READY_TAIL_PENDING':
+            raise RpcError('Cutover state changed before ready-tail promotion')
         with self.db.conn:
             for job in self.db.conn.execute('SELECT * FROM flow_shadow_jobs WHERE stage=?',(stage,)):
                 if job['highest_contiguous_verified_block']>=job['original_safe_start']:
@@ -419,6 +461,29 @@ class ShadowReconciler:
                     if not outstanding:
                         self.db.conn.execute('''INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key)
                           DO UPDATE SET value=excluded.value''',(f'flow_shadow_handoff:{launch}',f'{head}:{at}'))
+                cutover=cutover_session(self.db)
+                if cutover and cutover['state']=='READY_TAIL_PENDING':
+                    if cutover['H_live']!=head or cutover['id']!=self.meta('cutover_session_id'):
+                        raise RpcError('Cutover proof identity changed')
+                    for target in cutover['targets']:
+                        first=max(cutover['H_stop']+1,target['base'])
+                        if first>head:continue
+                        job=self.db.conn.execute('''SELECT original_safe_start,highest_contiguous_verified_block,
+                          completion_status FROM flow_shadow_jobs WHERE stage='wss_ready_tail'
+                          AND launch_id=? AND kind=?''',(target['launch_id'],target['kind'])).fetchone()
+                        if not job or job['original_safe_start']!=first or job['highest_contiguous_verified_block']!=head or job['completion_status']!='complete':
+                            raise RpcError('Cutover target has no complete ready-tail proof')
+                    for target in cutover['targets']:
+                        if self.db.conn.execute('''SELECT 1 FROM flow_gaps WHERE launch_id=? AND resolved=0
+                          AND id>? LIMIT 1''',(target['launch_id'],cutover['gap_id_before'])).fetchone():
+                            raise RpcError('Unexpected cutover gap remains')
+                    cutover=dict(cutover,state='READY_TAIL_VERIFIED',ready_tail_verified=True)
+                    cutover['history']=[*cutover['history'],['READY_TAIL_VERIFIED',time.time()]]
+                    save_cutover(self.db,cutover)
+                    self.db.conn.execute('''INSERT INTO flow_state VALUES('cutover_state','ready_tail_verified')
+                      ON CONFLICT(key) DO UPDATE SET value=excluded.value''')
+                    self.db.conn.execute('''INSERT INTO flow_state VALUES('last_connected_block',?)
+                      ON CONFLICT(key) DO UPDATE SET value=excluded.value''',(str(head),))
 
 
 def make_reconciler(config, settings, db, providers):
