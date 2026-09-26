@@ -218,6 +218,7 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_recovery_gap_boundaries_and_persisted_overlap(self):
         base=self.t['launch_block']
+        with self.assertRaises(RpcError):self.worker.recovery_plan(self.t,base-1)
         for gap in (0,99,100,101,354,355,2001):
             with self.subTest(gap=gap):
                 plan=self.worker.recovery_plan(self.t,base+gap)

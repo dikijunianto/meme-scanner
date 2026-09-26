@@ -125,6 +125,8 @@ class FlowWorker:
         filters=self.filters(t)
         bases={kind:t['launch_block'] for kind in filters}
         g=json.loads(t['graduation_json']) if t['graduation_json'] else None
+        if last<t['launch_block'] or (g and last<g['block_number']):
+            raise RpcError('Recovery head precedes target boundary')
         if g:
             filters['curve']={'address':t['curve_address'],'topics':[[BUY,SELL]]}
             bases.update(v4=g['block_number'],hook=g['block_number'],curve=t['launch_block'])
