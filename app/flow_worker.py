@@ -19,6 +19,8 @@ from app.flow_data import FlowDB, BUY, SELL, SWAP, HOOK, decode_event, stamp, is
 from app.rpc import Rpc, RpcError, LogRangeError, retry_delay
 
 log=logging.getLogger(__name__)
+RECOVERY_CHUNK_BLOCKS=2000
+RECOVERY_MAX_BLOCKS=100_000
 
 
 @dataclass
@@ -29,7 +31,6 @@ class FlowSettings:
     daily_calls: int=1000
     minute_calls: int=12
     daily_getlogs: int=400
-    recovery_blocks: int=100
     daily_ws_bytes: int=64_000_000
 
     @classmethod
@@ -45,7 +46,7 @@ class FlowSettings:
         result=cls(enabled=='true',Path(env.get('FLOW_DATABASE') or ROOT/'data/flow.db'))
         for attr,key,maximum in [('max_subscriptions','FLOW_MAX_ACTIVE_SUBSCRIPTIONS',128),('daily_calls','FLOW_MAX_HTTP_CALLS_PER_DAY',5000),
             ('minute_calls','FLOW_MAX_HTTP_CALLS_PER_MINUTE',30),('daily_getlogs','FLOW_MAX_RECOVERY_GETLOGS_PER_DAY',2000),
-            ('recovery_blocks','FLOW_RECOVERY_MAX_BLOCKS',1000),('daily_ws_bytes','FLOW_SECONDARY_WS_BYTES_PER_DAY',64_000_000)]:
+            ('daily_ws_bytes','FLOW_SECONDARY_WS_BYTES_PER_DAY',64_000_000)]:
             value=int(env.get(key) or getattr(result,attr))
             if not 1<=value<=maximum:raise ValueError('Unsafe '+key)
             setattr(result,attr,value)
@@ -116,6 +117,78 @@ class FlowWorker:
         self.connected=False;self.latest_block=0;self.last_tick=0;self.dirty=set()
         self.next_command=0
         self.ws_provider='publicnode'
+        self.pending_recovery=set()
+
+    # A global observed block is not a safe cursor for individual log filters.
+    # These cursors advance only after a complete, committed HTTP range.
+    def recovery_plan(self,t,last):
+        filters=self.filters(t)
+        bases={kind:t['launch_block'] for kind in filters}
+        g=json.loads(t['graduation_json']) if t['graduation_json'] else None
+        if g:
+            filters['curve']={'address':t['curve_address'],'topics':[[BUY,SELL]]}
+            bases.update(v4=g['block_number'],hook=g['block_number'],curve=t['launch_block'])
+        plans=[]
+        for kind,query in filters.items():
+            end=min(last,g['block_number']) if kind=='curve' and g else last
+            key=f'recovery:{t["launch_id"]}:{kind}'
+            persisted=self.db.state(key)
+            if persisted is not None and int(persisted)>last+2:raise RpcError('Recovery cursor is ahead of validated head')
+            if kind=='curve' and g and persisted is not None and int(persisted)>=end:continue
+            start=max(bases[kind],int(persisted)-2) if persisted is not None else bases[kind]
+            if end>=start:
+                if end-start+1>RECOVERY_MAX_BLOCKS:raise FlowBudget('Phase 2B recovery range exceeds bound')
+                plans.append((t,kind,query,key,start,end))
+        return plans
+
+    def check_recovery_budget(self,plans,span=RECOVERY_CHUNK_BLOCKS):
+        day=int(time.time())//86400*86400
+        calls=sum((end-start)//span+1 for _,_,_,_,start,end in plans)
+        reserved=calls*self.rpc.config.retry_attempts
+        if (self.db.used('flow_eth_getLogs',day)+reserved>self.settings.daily_getlogs or
+            self.db.used('flow_rpc_members',day)+reserved>self.settings.daily_calls):
+            raise FlowBudget('Phase 2B recovery plan exceeds remaining HTTP budget')
+        return calls
+
+    async def recover_plans(self,plans):
+        self.check_recovery_budget(plans)
+        for index,(t,kind,query,key,first,last) in enumerate(plans):
+            g=json.loads(t['graduation_json']) if t['graduation_json'] else None
+            boundary=(g['block_number'],g['log_index']) if g else None
+            current=first;span=RECOVERY_CHUNK_BLOCKS
+            while current<=last:
+                # A provider range rejection changes the remaining call estimate.
+                remainder=[(t,kind,query,key,current,last),*plans[index+1:]]
+                self.check_recovery_budget(remainder,span)
+                minute=int(time.time())//60*60
+                if self.db.used('flow_rpc_members',minute)>=self.settings.minute_calls:
+                    await asyncio.sleep(60-time.time()%60+.05)
+                    continue
+                end=min(last,current+span-1)
+                try:rows=await self.rpc.call('eth_getLogs',[dict(query,fromBlock=hex(current),toBlock=hex(end))])
+                except LogRangeError:
+                    if span==1:raise
+                    span=max(1,(end-current+1)//2)
+                    continue
+                if not isinstance(rows,list):raise RpcError('Invalid recovery logs')
+                for item in rows:
+                    if not isinstance(item,dict):raise RpcError('Invalid recovery log')
+                    try:block=int(item['blockNumber'],16);position=(block,int(item['logIndex'],16))
+                    except (KeyError,TypeError,ValueError):raise RpcError('Invalid recovery log position') from None
+                    if not current<=block<=end:
+                        raise RpcError('Recovery log outside requested range')
+                    if item.get('removed'):raise RpcError('Removed log in historical recovery')
+                    if kind=='curve' and position<(t['launch_block'],t['launch_log_index']):continue
+                    if boundary:
+                        if (kind=='curve' and position>=boundary) or (kind!='curve' and position<=boundary):continue
+                    if not item.get('blockTimestamp'):
+                        item['blockTimestamp']=hex(await self.header(int(item['blockNumber'],16)))
+                    if self.ingest(t,item) is False:raise RpcError('Recovery event rejected')
+                # Store the cursor after every event in this inclusive chunk committed.
+                self.db.set_state(key,end)
+                self.db.count('flow_recovery_blocks',end-current+1)
+                current=end+1
+                self.drain()
 
     def pressure(self):
         # Degrade flow first, leaving the base service's settings untouched.
@@ -186,27 +259,6 @@ class FlowWorker:
                 # Keep route until queued notifications are drained.
         return new
 
-    async def recover(self,t,first,last,filters=None):
-        if last<first:return True
-        complete=last-first+1<=self.settings.recovery_blocks
-        start=max(first,last-self.settings.recovery_blocks+1)
-        for query in (filters or self.filters(t)).values():
-            current=start;span=10
-            while current<=last:
-                end=min(last,current+span-1)
-                try:
-                    rows=await self.rpc.call('eth_getLogs',[dict(query,fromBlock=hex(current),toBlock=hex(end))])
-                except LogRangeError:
-                    if span==1:raise
-                    span=max(1,span//2);continue
-                self.db.count('flow_recovery_blocks',end-current+1)
-                for item in rows:
-                    if not item.get('blockTimestamp'):
-                        item['blockTimestamp']=hex(await self.header(int(item['blockNumber'],16)))
-                    self.ingest(t,item)
-                current=end+1
-        return complete
-
     def ingest(self,t,item):
         try:
             g=json.loads(t['graduation_json']) if t['graduation_json'] else None
@@ -232,10 +284,12 @@ class FlowWorker:
                 # including the old time when re-inclusion moves an event.
             if item.get('removed'):
                 self.db.gap(t['launch_id'],int(item.get('blockTimestamp','0x0'),16),time.time(),'reorg_unresolved')
+            return True
         except (ValueError,KeyError,OverflowError,IndexError,DecodingError) as exc:
             self.db.gap(t['launch_id'],t['tracking_start_at'],min(time.time(),t['tracking_end_at']),'unsupported_semantics')
             self.db.count('flow_rejected_events');self.dirty.add(t['launch_id'])
             log.warning('Flow event rejected launch=%s error=%s',t['launch_id'],type(exc).__name__)
+            return False
 
     async def discover(self):
         now=time.time()
@@ -277,6 +331,7 @@ class FlowWorker:
         try:await self.discover()
         except FlowBudget:self.db.count('flow_budget_pauses')
         targets=[dict(r) for r in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')")]
+        recovery=[]
         for t in targets:
             grad=self.main.execute('SELECT * FROM graduations WHERE token_address=? ORDER BY block_number,log_index LIMIT 1',(t['token_address'],)).fetchone()
             transition=bool(grad and not t['graduation_json'])
@@ -288,31 +343,30 @@ class FlowWorker:
             except FlowBudget:
                 self.db.gap(t['launch_id'],t['coverage_end_at'] or t['tracking_start_at'],now,'provider_budget')
                 self.db.count('flow_budget_pauses');continue
-            if new:
-                transition=bool(t['graduation_json'] and ('v4' in new or 'hook' in new))
-                # On reconnect use the last durable known block; on first activation recover launch.
-                first=(json.loads(t['graduation_json'])['block_number'] if transition else
-                       max(t['launch_block'],int(self.db.state('last_connected_block',t['launch_block']))-2) if t['coverage_start_at'] else t['launch_block'])
-                try:
-                    last=int(await self.rpc.call('eth_blockNumber',[]),16);self.latest_block=max(self.latest_block,last)
-                    complete=await self.recover(t,first,last)
-                except RpcError as exc:
-                    complete=False;log.warning('Flow recovery incomplete error=%s',type(exc).__name__)
-                if not complete:self.db.gap(t['launch_id'],t['last_event_at'] or t['tracking_start_at'],time.time(),'reconnect_recovery_incomplete')
-                # A graduation switch also closes the final curve segment.
-                if transition:
-                    g=json.loads(t['graduation_json'])
-                    try:
-                        curve_first=max(t['launch_block'],int(self.db.state('last_connected_block',t['launch_block']))-2) if t['coverage_start_at'] else t['launch_block']
-                        curve_ok=await self.recover(t,curve_first,g['block_number'],
-                            {'curve':{'address':t['curve_address'],'topics':[[BUY,SELL]]}})
-                        if not curve_ok:raise RpcError('Incomplete curve boundary')
-                    except RpcError:self.db.gap(t['launch_id'],t['tracking_start_at'],now,'graduation_boundary_ambiguous')
-                with self.db.conn:
+            if new or t['launch_id'] in self.pending_recovery:
+                self.pending_recovery.add(t['launch_id'])
+                recovery.append(t)
+        if recovery:
+            try:
+                # One validated upper bound prevents later targets chasing a moving head.
+                last=int(await self.rpc.call('eth_blockNumber',[]),16)
+                self.latest_block=max(self.latest_block,last)
+                plans=[plan for t in recovery for plan in self.recovery_plan(t,last)]
+                await self.recover_plans(plans)
+            except RpcError as exc:
+                log.warning('Flow recovery incomplete error=%s',type(exc).__name__)
+                for t in recovery:
+                    exists=self.db.conn.execute("SELECT 1 FROM flow_gaps WHERE launch_id=? AND reason='reconnect_recovery_incomplete' AND resolved=0 LIMIT 1",(t['launch_id'],)).fetchone()
+                    if not exists:self.db.gap(t['launch_id'],t['last_event_at'] or t['tracking_start_at'],time.time(),'reconnect_recovery_incomplete',t['launch_block'])
+                raise
+            with self.db.conn:
+                for t in recovery:
                     self.db.conn.execute('UPDATE flow_tracking_targets SET coverage_start_at=coalesce(coverage_start_at,?),status=?,updated_at=? WHERE launch_id=?',
-                        (t['tracking_start_at'] if complete else now,'active_v4' if t['graduation_json'] else 'active_curve',now,t['launch_id']))
-                    if complete:self.db.conn.execute("UPDATE flow_gaps SET resolved=1 WHERE launch_id=? AND reason='ws_gap' AND first_block>=? AND first_block<=? AND first_block>0",(t['launch_id'],first,last))
-                self.dirty.add(t['launch_id'])
+                        (t['tracking_start_at'],'active_v4' if t['graduation_json'] else 'active_curve',time.time(),t['launch_id']))
+                    self.db.conn.execute("UPDATE flow_gaps SET resolved=1 WHERE launch_id=? AND reason IN ('ws_gap','reconnect_recovery_incomplete') AND (first_block IS NULL OR first_block<=?)",
+                        (t['launch_id'],last))
+                    self.pending_recovery.discard(t['launch_id'])
+                    self.dirty.add(t['launch_id'])
 
     def drain(self):
         while not self.queue.empty():

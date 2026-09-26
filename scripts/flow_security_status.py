@@ -75,7 +75,7 @@ def status(since):
     paths=list(dict.fromkeys([secret_path.parent,secret_path,flow_path.parent,flow_path]+([flow_rpc_path] if flow_rpc_path.exists() else [])))
     return {'as_of':datetime.now(timezone.utc).isoformat(),'offline_config_validation':'passed','rpc_calls':0,
             'endpoints':endpoints,'chain_id':config.chain_id,'flow_enabled':settings.enabled,'services':services,
-            'flow_limits':{name:getattr(settings,name) for name in ('daily_calls','minute_calls','daily_getlogs','daily_ws_bytes','max_subscriptions','recovery_blocks')},
+            'flow_limits':{name:getattr(settings,name) for name in ('daily_calls','minute_calls','daily_getlogs','daily_ws_bytes','max_subscriptions')},
             'permissions':{str(p):oct(p.stat().st_mode&0o777) for p in paths},'integrity':integrity,
             'journal_since':since,'journal':journal_counts(since),
             'warning':'Fingerprints describe configuration, not proof of the key loaded in an already-running process. No provider authentication or revocation verified.'}

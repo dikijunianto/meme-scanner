@@ -200,20 +200,160 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(args[0]['address'],self.t['curve_address']);self.assertEqual(args[0]['topics'],[[BUY,SELL]])
             return [copy.deepcopy(e)]
         self.worker.rpc.call=AsyncMock(side_effect=rpc)
-        await self.worker.recover(self.t,self.t['launch_block'],self.t['launch_block'])
-        await self.worker.recover(self.t,self.t['launch_block'],self.t['launch_block'])
+        await self.worker.recover_plans(self.worker.recovery_plan(self.t,self.t['launch_block']))
+        await self.worker.recover_plans(self.worker.recovery_plan(self.t,self.t['launch_block']))
         self.assertEqual(sum(c.args[0]=='eth_getBlockByNumber' for c in self.worker.rpc.call.call_args_list),1)
         self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_events').fetchone()[0],1)
 
-    async def test_recovery_range_reduces_and_bounded_partial(self):
+    async def test_recovery_range_reduces_without_truncation(self):
         queries=[]
         async def rpc(method,args):
             q=args[0];span=int(q['toBlock'],16)-int(q['fromBlock'],16)+1;queries.append(span)
             if span>2:raise LogRangeError('range')
             return []
         self.worker.rpc.call=AsyncMock(side_effect=rpc)
-        self.settings.recovery_blocks=10
-        self.assertFalse(await self.worker.recover(self.t,1,20));self.assertEqual(queries[:3],[10,5,2])
+        await self.worker.recover_plans([(self.t,'curve',self.worker.filters(self.t)['curve'],'recovery:1:curve',1,20)])
+        self.assertEqual(queries[:3],[20,10,5])
+        self.assertEqual(self.db.state('recovery:1:curve'),'20')
+
+    async def test_recovery_gap_boundaries_and_persisted_overlap(self):
+        base=self.t['launch_block']
+        for gap in (0,99,100,101,354,355,2001):
+            with self.subTest(gap=gap):
+                plan=self.worker.recovery_plan(self.t,base+gap)
+                self.assertEqual((plan[0][4],plan[0][5]),(base,base+gap))
+                self.assertEqual(self.worker.check_recovery_budget(plan),(gap//2000)+1)
+        self.db.set_state('recovery:1:curve',base+354)
+        self.assertEqual(self.worker.recovery_plan(self.t,base+354)[0][4:6],(base+352,base+354))
+        self.assertEqual(self.worker.recovery_plan(self.t,base+355)[0][4],base+352)
+
+    async def test_nine_targets_have_independent_safe_cursors(self):
+        base=self.t['launch_block'];last=base+700
+        targets=[self.t]
+        for i in range(2,10):
+            t=target(launch=i);t['token_address']='0x'+format(i,'040x')
+            t['curve_address']='0x'+format(i+100,'040x')
+            targets.append(insert_target(self.db,t))
+        gaps=(0,1,99,100,101,354,355,500,700)
+        for t,gap in zip(targets,gaps):
+            if gap!=700:self.db.set_state(f'recovery:{t["launch_id"]}:curve',last-gap)
+            with self.db.conn:self.db.conn.execute('UPDATE flow_tracking_targets SET last_event_block=? WHERE launch_id=?',(last,t['launch_id']))
+        plans=[self.worker.recovery_plan(self.db.target(t['launch_id']),last)[0] for t in targets]
+        self.assertEqual(len(plans),9)
+        self.assertEqual([p[4] for p in plans],
+                         [max(base,last-g-2) if g!=700 else base for g in gaps])
+
+    async def test_graduated_target_recovers_curve_and_both_pool_filters(self):
+        base=self.t['launch_block'];g=fixture('v4_buy')['launch'];g['block_number']=base+100;g['log_index']=3
+        with self.db.conn:self.db.conn.execute('UPDATE flow_tracking_targets SET graduation_json=? WHERE launch_id=1',(json.dumps(g),))
+        plans=self.worker.recovery_plan(self.db.target(1),base+354)
+        self.assertEqual({p[1]:(p[4],p[5]) for p in plans},
+                         {'curve':(base,base+100),'v4':(base+100,base+354),'hook':(base+100,base+354)})
+        self.assertEqual(self.worker.check_recovery_budget(plans),3)
+        self.db.set_state('recovery:1:curve',base+354)
+        self.assertEqual({p[1] for p in self.worker.recovery_plan(self.db.target(1),base+354)}, {'v4','hook'})
+        self.db.set_state('recovery:1:curve',base+357)
+        with self.assertRaises(RpcError):self.worker.recovery_plan(self.db.target(1),base+354)
+
+    async def test_repeated_and_overlapping_recovery_is_idempotent(self):
+        base=self.t['launch_block'];e=event(self.t)
+        e['blockNumber']=hex(base+1999)
+        async def rpc(method,args):
+            query=args[0]
+            return [copy.deepcopy(e)] if int(query['fromBlock'],16)<=base+1999<=int(query['toBlock'],16) else []
+        self.worker.rpc.call=AsyncMock(side_effect=rpc)
+        await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+2000))
+        await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+2000))
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_events').fetchone()[0],1)
+        self.assertEqual(self.db.state('recovery:1:curve'),str(base+2000))
+        self.assertGreater(self.db.used('flow_duplicate_events',0),0)
+
+    async def test_partial_provider_failure_keeps_last_complete_chunk(self):
+        base=self.t['launch_block'];calls=0
+        async def rpc(method,args):
+            nonlocal calls
+            calls+=1
+            if calls==2:raise RpcError('provider offline')
+            return []
+        self.worker.rpc.call=AsyncMock(side_effect=rpc)
+        with self.assertRaises(RpcError):
+            await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+2000))
+        self.assertEqual(self.db.state('recovery:1:curve'),str(base+1999))
+        await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+2000))
+        self.assertEqual(self.db.state('recovery:1:curve'),str(base+2000))
+
+    async def test_recovery_budget_fails_before_logs_and_after_range_rejection(self):
+        base=self.t['launch_block'];self.settings.daily_getlogs=4
+        self.worker.rpc.call=AsyncMock(return_value=[])
+        with self.assertRaises(FlowBudget):
+            await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+4000))
+        self.worker.rpc.call.assert_not_called()
+        async def reject(method,args):
+            self.db.count('flow_eth_getLogs')
+            raise LogRangeError('range')
+        self.worker.rpc.call=AsyncMock(side_effect=reject)
+        with self.assertRaises(FlowBudget):
+            await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+1000))
+        self.assertEqual(self.worker.rpc.call.await_count,1)
+        self.assertIsNone(self.db.state('recovery:1:curve'))
+
+    async def test_crash_after_event_commit_replays_without_second_row(self):
+        base=self.t['launch_block'];e=event(self.t)
+        self.worker.rpc.call=AsyncMock(return_value=[copy.deepcopy(e)])
+        original=self.db.set_state
+        def crash(key,value):
+            if key=='recovery:1:curve':raise OSError('simulated crash')
+            return original(key,value)
+        with patch.object(self.db,'set_state',side_effect=crash):
+            with self.assertRaises(OSError):
+                await self.worker.recover_plans(self.worker.recovery_plan(self.t,base))
+        self.assertIsNone(self.db.state('recovery:1:curve'))
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_events').fetchone()[0],1)
+        await self.worker.recover_plans(self.worker.recovery_plan(self.t,base))
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_events').fetchone()[0],1)
+        self.assertEqual(self.db.state('recovery:1:curve'),str(base))
+
+    async def test_354_block_fixture_recovery_has_no_missing_or_duplicate_rows(self):
+        base=self.t['launch_block'];last=base+354
+        expected=[base,base+99,base+100,last]
+        logs=[]
+        for index,block in enumerate(expected,1):
+            item=event(self.t,index=index);item['blockNumber']=hex(block)
+            logs.append(item)
+        async def rpc(method,args):
+            q=args[0];first,end=int(q['fromBlock'],16),int(q['toBlock'],16)
+            return [copy.deepcopy(e) for e in logs if first<=int(e['blockNumber'],16)<=end for _ in (0,1)]
+        self.worker.rpc.call=AsyncMock(side_effect=rpc)
+        await self.worker.recover_plans(self.worker.recovery_plan(self.t,last))
+        self.assertEqual({r[0] for r in self.db.conn.execute('SELECT block_number FROM flow_events')},set(expected))
+        self.assertEqual(self.db.state('recovery:1:curve'),str(last))
+        await self.worker.recover_plans(self.worker.recovery_plan(self.t,last))
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_events').fetchone()[0],4)
+        self.assertGreater(self.db.used('flow_duplicate_events',0),0)
+        self.assertEqual(self.db.used('flow_eth_getLogs',0),0)  # Stubbed RPC; one planned call each run.
+        self.assertEqual(self.worker.rpc.call.await_count,2)
+
+    async def test_recovery_bound_and_rejected_log_never_advance_cursor(self):
+        base=self.t['launch_block']
+        with self.assertRaises(FlowBudget):self.worker.recovery_plan(self.t,base+100_000)
+        bad=event(self.t);bad['address']='0x'+'99'*20
+        self.worker.rpc.call=AsyncMock(return_value=[bad])
+        with self.assertRaises(RpcError):
+            await self.worker.recover_plans(self.worker.recovery_plan(self.t,base))
+        self.assertIsNone(self.db.state('recovery:1:curve'))
+        self.assertEqual(self.db.used('flow_rejected_events',0),1)
+
+    async def test_reconcile_reads_one_fixed_head_for_all_targets(self):
+        t2=target(launch=2);t2['token_address']='0x'+'02'*20;t2['curve_address']='0x'+'03'*20
+        insert_target(self.db,t2)
+        self.worker.command=AsyncMock(side_effect=['sub1','sub2'])
+        self.worker.discover=AsyncMock()
+        async def rpc(method,args):return hex(self.t['launch_block']+354) if method=='eth_blockNumber' else []
+        self.worker.rpc.call=AsyncMock(side_effect=rpc)
+        with patch('app.flow_worker.time.time',return_value=1100):await self.worker.reconcile()
+        self.assertEqual(sum(c.args[0]=='eth_blockNumber' for c in self.worker.rpc.call.call_args_list),1)
+        self.assertEqual(self.db.state('recovery:1:curve'),str(self.t['launch_block']+354))
+        self.assertEqual(self.db.state('recovery:2:curve'),str(self.t['launch_block']+354))
 
     async def test_headers_cache_reorg(self):
         h=HeaderCache();self.assertFalse(h.head({'number':'0x1','hash':'a','timestamp':'0x64'}))
@@ -235,8 +375,8 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_restart_restores_target_and_subscriptions(self):
         self.worker.command=AsyncMock(return_value='sub1')
-        self.worker.discover=AsyncMock();self.worker.rpc.call=AsyncMock(return_value=hex(self.t['launch_block']))
-        self.worker.recover=AsyncMock(return_value=True)
+        self.worker.discover=AsyncMock()
+        self.worker.rpc.call=AsyncMock(side_effect=lambda method,args:hex(self.t['launch_block']) if method=='eth_blockNumber' else [])
         with patch('app.flow_worker.time.time',return_value=1100):await self.worker.reconcile()
         self.assertIn((1,'curve'),self.worker.subscriptions);self.assertEqual(self.db.target(1)['status'],'active_curve')
 
@@ -349,12 +489,11 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.db.gap(1,1000,1100,'ws_gap',self.t['launch_block'])
         self.worker.command=AsyncMock(return_value='validation-sub')
         self.worker.discover=AsyncMock()
-        self.worker.rpc.call=AsyncMock(return_value=hex(self.t['launch_block']+2))
-        self.worker.recover=AsyncMock(return_value=True)
+        self.worker.rpc.call=AsyncMock(side_effect=lambda method,args:hex(self.t['launch_block']+354) if method=='eth_blockNumber' else [])
         with patch('app.flow_worker.time.time',return_value=1100):await self.worker.reconcile()
         self.assertEqual(self.worker.subscriptions[(1,'curve')],'validation-sub')
         self.assertEqual(self.worker.command.call_args.args[1][1],self.worker.filters(self.t)['curve'])
-        self.assertEqual(self.worker.recover.call_args.args[1],self.t['launch_block'])
+        self.assertEqual(self.db.state('recovery:1:curve'),str(self.t['launch_block']+354))
         self.assertEqual(self.db.conn.execute("SELECT resolved FROM flow_gaps WHERE reason='ws_gap'").fetchone()[0],1)
 
     async def test_usage_preserves_legacy_fields_and_exposes_routing(self):
@@ -366,13 +505,13 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report['routing']['flow_alchemy_http_requests'],0)
         self.assertEqual(report['routing']['secondary_ws_daily_cap'],64_000_000)
 
-    async def test_bounded_reconnect_does_not_clear_older_gap(self):
+    async def test_full_replay_resolves_old_global_anchor_gap(self):
         self.db.gap(1,1000,1050,'ws_gap',1)
         self.db.set_state('last_connected_block',self.t['launch_block'])
         self.worker.command=AsyncMock(return_value='sub');self.worker.discover=AsyncMock()
-        self.worker.rpc.call=AsyncMock(return_value=hex(self.t['launch_block']));self.worker.recover=AsyncMock(return_value=True)
+        self.worker.rpc.call=AsyncMock(side_effect=lambda method,args:hex(self.t['launch_block']) if method=='eth_blockNumber' else [])
         with patch('app.flow_worker.time.time',return_value=1100):await self.worker.reconcile()
-        self.assertEqual(self.db.conn.execute('SELECT resolved FROM flow_gaps').fetchone()[0],0)
+        self.assertEqual(self.db.conn.execute('SELECT resolved FROM flow_gaps').fetchone()[0],1)
 
     async def test_pressure_paused_target_still_expires_and_feature_not_zero(self):
         with self.db.conn:self.db.conn.execute('UPDATE flow_tracking_targets SET coverage_end_at=1050')

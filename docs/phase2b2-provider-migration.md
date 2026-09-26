@@ -2,10 +2,11 @@
 
 ## Status and evidence
 
-Implementation commit: `6fa1d28`. Production cutover is **pending**: at the
-2026-09-24 16:06 UTC preflight, Phase 2B had used all 400 allowed `eth_getLogs`
-calls for the UTC day. Restarting before that budget resets would leave the
-startup gap unreconciled. No flow or main service was restarted during staging.
+Original implementation commit: `6fa1d28`. Production cutover is **pending**.
+The 2026-09-24 budget block reset, but the next preflight found the original
+100-block startup replay could not cover the actual gap. A per-target recovery
+patch is staged for a fresh preflight; neither production service or route has
+been changed by that patch.
 
 Round 3 compared Validation Cloud and PublicNode WSS concurrently against
 Validation HTTP: V4 8/8 and hook 7/7 on each WSS, with no missing, extra,
@@ -44,7 +45,12 @@ Validation HTTP recovery uses the last persisted block anchor. Canonical
 event identity deduplicates replay. There is no automatic Alchemy fallback.
 
 HTTP limits remain 1,000 members/day, 12/minute, 400 `eth_getLogs`/day,
-0.5 envelopes/second and 100 recovery blocks. The old 8 MB Alchemy WSS
+and 0.5 envelopes/second. The pending recovery patch uses per-target/filter
+committed cursors, 2,000-block filtered queries, and a 100,000-block hard
+limit per filter. It preflights the aggregate plan with all three allowed
+attempts reserved for each query; provider range rejection causes a fresh
+budget check before any smaller query. A failed or incomplete replay keeps
+its last fully committed cursor and leaves the gap unresolved. The old 8 MB Alchemy WSS
 pause is replaced by `FLOW_SECONDARY_WS_BYTES_PER_DAY=64000000`. This is an
 **internal emergency circuit breaker**, not a PublicNode or Validation quota.
 The historical aggregate byte counter remains; new counters identify the
@@ -75,6 +81,7 @@ install -m 644 /tmp/meme-scanner-phase2b2-test/app/flow_reports.py app/flow_repo
 install -m 644 /tmp/meme-scanner-phase2b2-test/scripts/flow_usage_report.py scripts/flow_usage_report.py
 install -m 644 /tmp/meme-scanner-phase2b2-test/scripts/flow_security_status.py scripts/flow_security_status.py
 sed -i 's/^FLOW_MAX_WS_BYTES_PER_DAY=8000000$/FLOW_SECONDARY_WS_BYTES_PER_DAY=64000000/' config/flow.env
+sed -i '/^FLOW_RECOVERY_MAX_BLOCKS=/d' config/flow.env
 chmod 600 config/flow.env
 install -m 644 /tmp/meme-scanner-phase2b2-test/deploy/meme-scanner-flow.service deploy/meme-scanner-flow.service
 sudo install -m 644 deploy/meme-scanner-flow.service /etc/systemd/system/meme-scanner-flow.service
@@ -146,5 +153,5 @@ zero credential leaks, healthy main/Phase 2A, and flow DB integrity `ok`.
 Cutover UTC time: pending. Startup recovery range/result: pending. Thirty-minute
 live validation, Alchemy isolation, main isolation, resources, DB growth,
 security scan and final gate: pending. Do not report `READY_24H_SOAK` until
-all checks above pass. Current gate: `MIGRATION_BLOCKED` by today's exhausted
-recovery budget. No Phase 2C or trading change is included.
+all checks above pass. A fresh budget, head, and per-target recovery preflight
+is required before any cutover. No Phase 2C or trading change is included.

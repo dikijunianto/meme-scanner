@@ -6,7 +6,7 @@ import shutil
 import time
 from app.config import Config
 from app.flow_data import iso, stamp
-from app.flow_worker import FlowSettings
+from app.flow_worker import FlowSettings, RECOVERY_CHUNK_BLOCKS, RECOVERY_MAX_BLOCKS
 from app.flow_reports import readonly
 
 
@@ -45,7 +45,7 @@ def model(conn,settings,now=None):
       'historical_peak_active':peak,'expected_average_subscriptions_inferred':(total_seconds+v4_seconds)/86400,
       'peak_subscription_capacity_inferred':peak*2,'configured_subscription_cap':settings.max_subscriptions,
       'http_scenarios':{'new_target_typical_members':5,'new_target_max_attempts_bounded_by_daily_budget':settings.daily_calls,
-                        'reconnect_max_blocks_per_filter':settings.recovery_blocks,'reconnect_getlogs_per_filter_without_rejection':(settings.recovery_blocks+9)//10,
+                        'reconnect_max_blocks_per_filter':RECOVERY_MAX_BLOCKS,'reconnect_getlogs_per_filter_without_rejection':(RECOVERY_MAX_BLOCKS+RECOVERY_CHUNK_BLOCKS-1)//RECOVERY_CHUNK_BLOCKS,
                         'recovery_headers':'unique missing-timestamp blocks only; included in HTTP cap','tx_enrichment':0},
       'event_rate_before_benchmark':'NOT YET MEASURED; curve/V4/hook activity unknown',
       'ws_capacity_bytes_day':settings.daily_ws_bytes,'raw_rows_capacity_scenario_day':rows_day,
