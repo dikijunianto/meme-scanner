@@ -243,6 +243,33 @@ class ShadowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runner.summary('historical')['blocks_verified'],13)
         self.assertEqual(self.runner.meta('H_prefetch'),str(self.base+12))
 
+    async def test_late_target_cursor_does_not_invalidate_old_prefetch(self):
+        head=self.base+5
+        self.mock_rpc(head)
+        await self.runner.start_historical()
+        self.assertTrue(await self.runner.run_stage('historical'))
+        for launch,offset in ((2,20),(3,22)):
+            t=target(launch=launch);t['launch_block']=self.base+offset
+            t['token_address']='0x'+format(launch,'040x')
+            t['curve_address']='0x'+format(launch+100,'040x')
+            insert_target(self.db,t)
+            self.db.set_state(f'recovery:{launch}:curve',self.base+25)
+        # Reproduce the empty, complete job written by the earlier preflight.
+        with self.db.conn:self.db.conn.execute('''INSERT INTO flow_shadow_jobs
+          (stage,launch_id,kind,original_safe_start,reconciliation_upper_bound,
+           next_unverified_block,highest_contiguous_verified_block,completion_status)
+          VALUES('historical',2,'curve',?,?,?,?,'complete')''',
+          (self.base+20,head,self.base+20,self.base+19))
+        self.runner.add_jobs('historical',0,head)
+        self.assertEqual({j['launch_id'] for j in self.runner.summary('historical')['jobs']},{1,2})
+        self.assertIn((3,'curve',self.base+22,self.base+30),self.runner.tail_plan(self.base+30)['ranges'])
+        self.patch.stop();calls=self.mock_rpc(self.base+30)
+        self.assertEqual(await self.runner.start_historical(),self.base+30)
+        self.assertTrue(await self.runner.run_stage('historical'))
+        jobs={j['launch_id']:j for j in self.runner.summary('historical')['jobs']}
+        self.assertEqual(jobs[2]['highest_contiguous_verified_block'],self.base+30)
+        self.assertIn((self.base+20,self.base+30),calls)
+
     async def test_proved_gap_handoff_resolves_and_stops_redundant_recovery(self):
         self.mock_rpc(self.base+10)
         self.runner.set_meta('H_prefetch',self.base+5)

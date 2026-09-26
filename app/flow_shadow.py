@@ -150,6 +150,18 @@ class ShadowReconciler:
         with self.db.conn:
             for target in targets:
                 for kind, _, base, end in self.periods(target, head):
+                    # A filter born after this head belongs wholly to the tail.
+                    if stage=='historical' and base>head:continue
+                    row=self.db.conn.execute('''SELECT original_safe_start,reconciliation_upper_bound
+                      FROM flow_shadow_jobs WHERE stage=? AND launch_id=? AND kind=?''',
+                      (stage,target['launch_id'],kind)).fetchone()
+                    if row and stage=='historical':
+                        gap=self.db.conn.execute('''SELECT min(first_block) FROM flow_gaps WHERE launch_id=?
+                          AND resolved=0 AND reason IN ('ws_gap','reconnect_recovery_incomplete')
+                          AND first_block IS NOT NULL''',(target['launch_id'],)).fetchone()[0]
+                        if row[1]!=end or (gap is not None and max(base,gap)<row[0]):
+                            raise RpcError('Shadow job boundaries changed; operator review required')
+                        continue
                     start=max(first,self.historical_start(target,kind,base,head)) if stage=='historical' else max(first,base)
                     self.db.conn.execute('''INSERT OR IGNORE INTO flow_shadow_jobs
                       (stage,launch_id,kind,original_safe_start,reconciliation_upper_bound,
@@ -180,12 +192,12 @@ class ShadowReconciler:
                               FROM flow_shadow_jobs WHERE stage='historical' AND launch_id=? AND kind=?''',
                               (target['launch_id'],kind)).fetchone()
                             if row:
-                                if row[1]>end or row[2]!=row[1]+1:
+                                if row[1]>end or row[2]!=(row[0] if row[0]>row[1] else row[1]+1):
                                     raise RpcError('Historical filter changed before head extension')
                                 if end>row[1]:
                                     self.db.conn.execute('''UPDATE flow_shadow_jobs SET reconciliation_upper_bound=?,
-                                      completion_status='pending' WHERE stage='historical' AND launch_id=? AND kind=?''',
-                                      (end,target['launch_id'],kind))
+                                      completion_status=? WHERE stage='historical' AND launch_id=? AND kind=?''',
+                                      (end,'complete' if row[0]>end else 'pending',target['launch_id'],kind))
                             else:
                                 start=self.historical_start(target,kind,base,newer)
                                 self.db.conn.execute('''INSERT INTO flow_shadow_jobs
