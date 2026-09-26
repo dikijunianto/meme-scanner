@@ -333,6 +333,54 @@ class ShadowReconciler:
                 'base_queries':calls,'reserved_attempts':calls*self.worker.rpc.config.retry_attempts,
                 'remaining':remaining,'ready':remaining>=calls*self.worker.rpc.config.retry_attempts+CUTOVER_RESERVE}
 
+    def resolve_rollback_restart_gaps(self, gap_ids, head):
+        """Close only the named restart gaps after four contiguous durable proofs."""
+        if len(set(gap_ids))!=3 or self.meta('H_rollback_restart')!=str(head):
+            raise RpcError('Rollback restart proof identity changed')
+        stages=('historical','stop_tail','rollback_tail','rollback_restart_tail')
+        at=int(time.time())
+        with self.db.conn:
+            if self.db.state('current_wss_provider')!='alchemy':
+                raise RpcError('Legacy flow is not connected to Alchemy')
+            sample=self.db.conn.execute('SELECT at,subscriptions FROM flow_samples ORDER BY at DESC LIMIT 1').fetchone()
+            if not sample or at-sample[0]>65:
+                raise RpcError('Legacy flow subscription sample is stale')
+            resolved=[];handoff=[]
+            for gap_id in gap_ids:
+                gap=self.db.conn.execute('SELECT launch_id,reason,first_block,end_at,resolved FROM flow_gaps WHERE id=?',(gap_id,)).fetchone()
+                if not gap or gap['reason']!='ws_gap' or gap['first_block'] is None or gap['end_at']>at:
+                    raise RpcError('Rollback restart gap changed')
+                if gap['resolved']:continue
+                launch=gap['launch_id']
+                jobs={row['stage']:row for row in self.db.conn.execute('''SELECT stage,original_safe_start,
+                  highest_contiguous_verified_block,completion_status FROM flow_shadow_jobs
+                  WHERE launch_id=? AND kind='curve' AND stage IN ('historical','stop_tail','rollback_tail','rollback_restart_tail')''',(launch,))}
+                if (set(jobs)!=set(stages) or any(j['completion_status']!='complete' for j in jobs.values()) or
+                    jobs[stages[0]]['original_safe_start']>gap['first_block'] or
+                    any(jobs[a]['highest_contiguous_verified_block']+1!=jobs[b]['original_safe_start']
+                        for a,b in zip(stages,stages[1:])) or
+                    jobs[stages[-1]]['highest_contiguous_verified_block']!=head):
+                    raise RpcError('Rollback restart gap has incomplete proof')
+                prior=self.db.conn.execute('''SELECT first_block,end_at FROM flow_gaps WHERE launch_id=?
+                  AND resolved=0 AND reason IN ('ws_gap','reconnect_recovery_incomplete') AND id!=?''',(launch,gap_id))
+                if any(first is None or not jobs[stages[0]]['original_safe_start']<=first<=head or end>at
+                       for first,end in prior):
+                    raise RpcError('Another live recovery gap is outside proof')
+                target=self.db.target(launch)
+                if not target:raise RpcError('Rollback restart target disappeared')
+                self.db.conn.execute('UPDATE flow_gaps SET resolved=1 WHERE id=? AND resolved=0',(gap_id,))
+                self.db.conn.execute('''INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key)
+                  DO UPDATE SET value=max(cast(value AS INTEGER),cast(excluded.value AS INTEGER))''',
+                  (f'recovery:{launch}:curve',str(head)))
+                if target['status'] not in ('completed','partial') and target['tracking_end_at']+10>=at:
+                    handoff.append(launch)
+                    self.db.conn.execute('''INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key)
+                      DO UPDATE SET value=excluded.value''',(f'flow_shadow_handoff:{launch}',f'{head}:{at}'))
+                resolved.append(gap_id)
+            if sample['subscriptions']<len(handoff):
+                raise RpcError('Legacy flow subscriptions are not acknowledged')
+        return {'resolved':resolved,'handoff_targets':handoff}
+
     def promote(self, stage):
         if not self.complete(stage):raise RpcError('Cannot promote incomplete shadow stage')
         with self.db.conn:

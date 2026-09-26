@@ -243,6 +243,49 @@ class ShadowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runner.summary('historical')['blocks_verified'],13)
         self.assertEqual(self.runner.meta('H_prefetch'),str(self.base+12))
 
+    async def test_exact_three_rollback_gaps_require_proof_and_resume_idempotently(self):
+        import time
+        for launch in (2,3):
+            t=target(launch=launch)
+            t['token_address']='0x'+format(launch,'040x')
+            t['curve_address']='0x'+format(launch+100,'040x')
+            insert_target(self.db,t)
+        calls=self.mock_rpc(self.base+13)
+        self.runner.set_meta('H_prefetch',self.base+5)
+        self.runner.add_jobs('historical',0,self.base+5)
+        self.assertTrue(await self.runner.run_stage('historical'))
+        for stage,first,last in (('stop_tail',6,7),('rollback_tail',8,9),
+                                 ('rollback_restart_tail',10,13)):
+            self.runner.add_jobs(stage,self.base+first,self.base+last)
+            self.assertTrue(await self.runner.run_stage(stage))
+        head=self.base+13
+        self.runner.set_meta('H_rollback_restart',head)
+        now=time.time()
+        with self.db.conn:
+            self.db.conn.execute('UPDATE flow_tracking_targets SET tracking_end_at=? WHERE launch_id IN (1,2,3)',(now+3600,))
+            self.db.conn.execute('INSERT INTO flow_samples(at,active,subscriptions) VALUES(?,?,?)',(now,3,3))
+        self.db.set_state('current_wss_provider','alchemy')
+        ids=[]
+        for launch in (1,2,3):
+            self.db.gap(launch,now-10,now-5,'ws_gap',self.base+3)
+            ids.append(self.db.conn.execute('SELECT max(id) FROM flow_gaps').fetchone()[0])
+        main_before=self.main.execute('SELECT count(*) FROM launches').fetchone()[0]
+        with self.db.conn:self.db.conn.execute("UPDATE flow_shadow_jobs SET completion_status='pending' WHERE stage='rollback_restart_tail' AND launch_id=3")
+        with self.assertRaises(RpcError):self.runner.resolve_rollback_restart_gaps(ids,head)
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_gaps WHERE resolved=0').fetchone()[0],3)
+        with self.db.conn:self.db.conn.execute("UPDATE flow_shadow_jobs SET completion_status='complete' WHERE stage='rollback_restart_tail' AND launch_id=3")
+        result=self.runner.resolve_rollback_restart_gaps(ids,head)
+        self.assertEqual(result['resolved'],ids)
+        self.assertEqual(result['handoff_targets'],[1,2,3])
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_gaps WHERE resolved=0').fetchone()[0],0)
+        self.assertEqual(self.runner.resolve_rollback_restart_gaps(ids,head)['resolved'],[])
+        count=len(calls)
+        self.assertTrue(await self.runner.run_stage('rollback_restart_tail'))
+        self.assertEqual(len(calls),count)
+        self.assertEqual(self.main.execute('SELECT count(*) FROM launches').fetchone()[0],main_before)
+        self.assertEqual(self.db.used('flow_eth_getTransactionByHash',0),0)
+        self.assertEqual(self.db.used('flow_eth_getTransactionReceipt',0),0)
+
     async def test_late_target_cursor_does_not_invalidate_old_prefetch(self):
         head=self.base+5
         self.mock_rpc(head)

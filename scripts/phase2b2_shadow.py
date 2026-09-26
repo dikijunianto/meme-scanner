@@ -10,6 +10,7 @@ import httpx
 from websockets.asyncio.client import connect
 
 from app.config import Config
+from app.flow_config import prestart_check
 from app.flow_data import FlowDB
 from app.flow_providers import FlowProviders
 from app.flow_shadow import make_reconciler, verified_checkout
@@ -44,7 +45,7 @@ async def operate(mode):
     main=service('meme-scanner.service')
     flow=service('meme-scanner-flow.service')
     if main['ActiveState']!='active':raise RpcError('Main service is not active')
-    if mode in ('prefetch','preflight') and flow['ActiveState']!='active':
+    if mode in ('prefetch','preflight','stop-flow') and flow['ActiveState']!='active':
         raise RpcError('Old flow must remain active')
     if mode=='stop-tail' and flow['ActiveState']!='inactive':
         raise RpcError('Stop only flow after preflight')
@@ -80,14 +81,29 @@ async def operate(mode):
                 raise RpcError('Old flow is not continuously active')
             runner.add_jobs('historical',0,int(runner.meta('H_prefetch')))
             if not runner.complete('historical'):raise RpcError('Historical shadow reconciliation incomplete')
+            prestart=await prestart_check()
             if db.conn.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RpcError('Flow database integrity failed')
             if runner.worker.main.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RpcError('Main database integrity failed')
             identities=await chain_ids(config,providers)
             head=int(await runner.worker.rpc.call('eth_blockNumber',[]),16)
             plan=runner.tail_plan(head)
             if plan['ready']:runner.set_meta('H_pre_stop',head)
-            return {'revision':revision,'chain_ids':identities,'databases':'ok',**plan,
+            return {'revision':revision,'chain_ids':identities,'databases':'ok',
+                    'service_user_readable':prestart['readable_by_service_user'],**plan,
                     'gate':'CUTOVER_PREFLIGHT_PASS' if plan['ready'] else 'MIGRATION_BLOCKED'}
+        if mode=='stop-flow':
+            if (not settings.split_enabled or flow['MainPID']!=runner.meta('old_flow_pid') or
+                not runner.meta('H_pre_stop') or not runner.complete('historical')):
+                raise RpcError('Flow stop gate is incomplete')
+            await prestart_check(require_split=True)
+            if db.conn.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RpcError('Flow database integrity failed')
+            if runner.worker.main.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RpcError('Main database integrity failed')
+            head=int(await runner.worker.rpc.call('eth_blockNumber',[]),16)
+            plan=runner.tail_plan(head)
+            if not plan['ready']:
+                return {'revision':revision,**plan,'gate':'MIGRATION_BLOCKED'}
+            subprocess.run(('sudo','-n','systemctl','stop','meme-scanner-flow.service'),check=True)
+            return {'revision':revision,**plan,'gate':'FLOW_STOPPED_FOR_CUTOVER'}
         if mode=='stop-tail':
             if flow['ActiveState']!='inactive':raise RpcError('Stop only flow after preflight; main must remain active')
             if not runner.meta('H_pre_stop'):raise RpcError('No passed pre-stop gate')
@@ -136,7 +152,7 @@ async def operate(mode):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
-    parser.add_argument('mode',choices=('prefetch','preflight','stop-tail','ready-tail','status'))
+    parser.add_argument('mode',choices=('prefetch','preflight','stop-flow','stop-tail','ready-tail','status'))
     args=parser.parse_args()
     try:print(json.dumps(asyncio.run(operate(args.mode)),indent=2))
     except Exception as exc:

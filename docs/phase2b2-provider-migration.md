@@ -40,21 +40,34 @@ Immediately before cutover, run:
 ```
 
 This checks the pinned Git revision, old flow PID continuity, both DB integrity
-checks, all four provider chain identities (4663), and current Validation head.
+checks, all four provider chain identities (4663), current Validation head, and
+a network-free startup probe run as the installed flow unit's service user.
 It estimates only `H_prefetch+1..H_pre_stop` with the smallest observed successful
 non-terminal chunk and three attempts per query. At least 50 calls must remain
 after this estimate. If the result is `MIGRATION_BLOCKED`, keep the old flow
 running; `prefetch` can extend the common head before another preflight.
 
 Only after `CUTOVER_PREFLIGHT_PASS`: capture service PIDs/restart counts, event
-and feature totals, budget, and recovery ledger; stop **only**
-`meme-scanner-flow.service`. Run `stop-tail` immediately. It rechecks the budget
+and feature totals, budget, and recovery ledger. While the old flow process is
+still running, use the ownership-safe helper and repeat its service-user probe:
+
+```sh
+.venv/bin/python scripts/flow_config_status.py --enable-split
+.venv/bin/python scripts/flow_config_status.py --preflight --require-split
+.venv/bin/python scripts/phase2b2_shadow.py stop-flow
+```
+
+`--enable-split` creates the replacement inside protected `config/`, explicitly
+sets the installed service user's uid/gid and mode 0600, fsyncs it, atomically
+replaces the file, fsyncs the directory, and tests readability as that user.
+The `stop-flow` command refuses to stop anything unless the exact service-user
+no-network startup probe and current tail budget pass. Do not use a direct
+`systemctl stop` for cutover. Run `stop-tail` immediately. It rechecks the budget
 against the actual `H_stop`, reconciles through that head, and promotes only
 verified filter cursors. A failure yields `ROLLBACK_REQUIRED`; use the flow-only
 rollback below. Do not start the new route with an unresolved stop tail.
 
-Set `FLOW_PROVIDER_SPLIT_ENABLED=true` in protected `config/flow.env` (mode 0600),
-install the verified tree's `deploy/meme-scanner-flow.service` as the flow-only
+Install the verified tree's `deploy/meme-scanner-flow.service` as the flow-only
 systemd unit, reload systemd, and start **only** `meme-scanner-flow.service`.
 Its primary WSS is PublicNode,
 fallback WSS is Validation, and HTTP recovery is Validation. Once PublicNode is
