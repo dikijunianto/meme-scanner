@@ -194,7 +194,18 @@ class FlowDB:
         r=self.conn.execute('SELECT * FROM flow_tracking_targets WHERE launch_id=?',(launch_id,)).fetchone()
         return dict(r) if r else None
 
-    def store(self,target,log,event,observed=None):
+    def store(self,target,log,event,observed=None,shadow=False):
+        if shadow:
+            if not log.get('blockTimestamp'):raise ValueError('Shadow log requires a verified block timestamp')
+            # Serialize the duplicate read with the live writer's commit.
+            self.conn.execute('BEGIN IMMEDIATE')
+            try:return self._store(target,log,event,observed,shadow)
+            except BaseException:
+                self.conn.rollback()
+                raise
+        return self._store(target,log,event,observed,shadow)
+
+    def _store(self,target,log,event,observed,shadow):
         observed=observed or time.time()
         event_time=int(log['blockTimestamp'],16) if log.get('blockTimestamp') else observed
         source='log_block_timestamp' if log.get('blockTimestamp') else 'observed_at'
@@ -203,7 +214,9 @@ class FlowDB:
         removed=int(log.get('removed',False))
         old=self.conn.execute('SELECT removed,block_hash,event_time FROM flow_events WHERE chain_id=? AND tx_hash=? AND log_index=?',identity).fetchone()
         if old and old['removed']==removed and old['block_hash']==log['blockHash']:
-            self.count('flow_duplicate_events');return False
+            self.count('flow_duplicate_events')
+            if shadow:self.count(f'flow_shadow_duplicates:{shadow}:{target["launch_id"]}:{event["phase"]}')
+            return False
         with self.conn:
             dirty_from=min(event_time,old['event_time'] if old else event_time,float(self.state('features_dirty_from',event_time)))
             self.conn.execute("INSERT INTO flow_state VALUES('features_dirty_from',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(str(dirty_from),))
@@ -216,8 +229,13 @@ class FlowDB:
               (*identity,target['launch_id'],event['phase'],int(log['blockNumber'],16),log['blockHash'],event_time,
                source,observed,removed,event.get('direction'),event.get('caller_address'),event.get('recipient_address'),
                event.get('swap_sender'),None,log['address'].lower(),'verified' if source!='observed_at' else 'partial',json.dumps(event)))
-            self.conn.execute('UPDATE flow_tracking_targets SET last_event_block=?,last_event_at=? WHERE launch_id=?',
+            self.conn.execute('''UPDATE flow_tracking_targets SET
+              last_event_block=max(coalesce(last_event_block,0),?),
+              last_event_at=max(coalesce(last_event_at,0),?) WHERE launch_id=?''',
                               (int(log['blockNumber'],16),event_time,target['launch_id']))
+            if shadow:
+                self.conn.execute('INSERT INTO flow_usage VALUES(?,?,1) ON CONFLICT(minute,metric) DO UPDATE SET count=count+1',
+                                  (int(time.time())//60*60,f'flow_shadow_events_stored:{shadow}:{target["launch_id"]}:{event["phase"]}'))
         self.count('flow_removed_events' if removed else 'flow_events_stored')
         if not removed:self.count('flow_'+event['phase']+'_'+(event.get('direction') or 'fee')+'_events')
         if not removed and event['phase']=='v4':self.count('flow_v4_swap_events')

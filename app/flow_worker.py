@@ -19,14 +19,15 @@ from app.flow_data import FlowDB, BUY, SELL, SWAP, HOOK, decode_event, stamp, is
 from app.rpc import Rpc, RpcError, LogRangeError, retry_delay
 
 log=logging.getLogger(__name__)
-RECOVERY_CHUNK_BLOCKS=2000
-RECOVERY_MAX_BLOCKS=100_000
+RECOVERY_CHUNK_BLOCKS=10
+RECOVERY_MAX_BLOCKS=100
 
 
 @dataclass
 class FlowSettings:
     enabled: bool=False
     database: Path=ROOT/'data/flow.db'
+    split_enabled: bool=True
     max_subscriptions: int=64
     daily_calls: int=1000
     minute_calls: int=12
@@ -41,15 +42,20 @@ class FlowSettings:
         env=dotenv_values(path,interpolate=False)
         enabled=env.get('FLOW_TRACKING_ENABLED','false').lower()
         if enabled not in ('true','false'):raise ValueError('Invalid flow enabled flag')
+        split=env.get('FLOW_PROVIDER_SPLIT_ENABLED','false').lower()
+        if split not in ('true','false'):raise ValueError('Invalid flow provider split flag')
         if env.get('FLOW_TX_ENRICHMENT_ENABLED','false').lower()!='false':raise ValueError('Transaction enrichment is not enabled in this phase')
         if tuple(map(int,env.get('FLOW_FEATURE_WINDOWS','30,60,300,900,3600').split(',')))!=WINDOWS:raise ValueError('Required windows must be preserved')
-        result=cls(enabled=='true',Path(env.get('FLOW_DATABASE') or ROOT/'data/flow.db'))
+        result=cls(enabled=='true',Path(env.get('FLOW_DATABASE') or ROOT/'data/flow.db'),split=='true')
         for attr,key,maximum in [('max_subscriptions','FLOW_MAX_ACTIVE_SUBSCRIPTIONS',128),('daily_calls','FLOW_MAX_HTTP_CALLS_PER_DAY',5000),
             ('minute_calls','FLOW_MAX_HTTP_CALLS_PER_MINUTE',30),('daily_getlogs','FLOW_MAX_RECOVERY_GETLOGS_PER_DAY',2000),
             ('daily_ws_bytes','FLOW_SECONDARY_WS_BYTES_PER_DAY',64_000_000)]:
             value=int(env.get(key) or getattr(result,attr))
             if not 1<=value<=maximum:raise ValueError('Unsafe '+key)
             setattr(result,attr,value)
+        if not result.split_enabled:
+            result.daily_ws_bytes=int(env.get('FLOW_MAX_WS_BYTES_PER_DAY') or 8_000_000)
+            if not 1<=result.daily_ws_bytes<=8_000_000:raise ValueError('Unsafe legacy WS byte budget')
         return result
 
 
@@ -59,7 +65,8 @@ class FlowBudget(RpcError):
 
 class FlowRpc(Rpc):
     def __init__(self,config,settings,db,providers):
-        super().__init__(replace(config,rpc_http=providers.http,rpc_ws='',fallback_http='',rpc_rps=.5,retry_attempts=3))
+        super().__init__(replace(config,rpc_http=providers.http if settings.split_enabled else config.rpc_http,
+                                 rpc_ws='',fallback_http='',rpc_rps=.5,retry_attempts=3))
         self.settings,self.db=settings,db
         self.telemetry=self
 
@@ -116,7 +123,7 @@ class FlowWorker:
         self.subscriptions={};self.routes={};self.queue=asyncio.Queue(maxsize=2048)
         self.connected=False;self.latest_block=0;self.last_tick=0;self.dirty=set()
         self.next_command=0
-        self.ws_provider='publicnode'
+        self.ws_provider='publicnode' if settings.split_enabled else 'alchemy'
         self.pending_recovery=set()
 
     # A global observed block is not a safe cursor for individual log filters.
@@ -224,7 +231,11 @@ class FlowWorker:
             else:raise RpcError('Unexpected WS message')
 
     def secondary_ws_bytes(self,day):
+        if not self.settings.split_enabled:return self.db.used('flow_ws_bytes',day)
         return sum(self.db.used('flow_ws_bytes_'+name,day) for name in ('publicnode','validation'))
+
+    def ws_url(self):
+        return self.config.rpc_ws if self.ws_provider=='alchemy' else self.providers.ws(self.ws_provider)
 
     async def command(self,method,params):
         loop=asyncio.get_running_loop()
@@ -261,7 +272,7 @@ class FlowWorker:
                 # Keep route until queued notifications are drained.
         return new
 
-    def ingest(self,t,item):
+    def ingest(self,t,item,shadow=False):
         try:
             g=json.loads(t['graduation_json']) if t['graduation_json'] else None
             event=decode_event(item,t,g)
@@ -279,7 +290,7 @@ class FlowWorker:
                     self.db.gap(t['launch_id'],at,at,'reorg_unresolved')
                     self.dirty.update(r[0] for r in self.db.conn.execute('SELECT DISTINCT launch_id FROM flow_events WHERE block_number=?',(block,)))
                 if not t['tracking_start_at']<=at<=t['tracking_end_at'] and not item.get('removed'):return
-            changed=self.db.store(t,item,event)
+            changed=self.db.store(t,item,event,shadow=shadow)
             if changed:
                 self.dirty.add(t['launch_id'])
                 # The store atomically persists the earliest changed event time,
@@ -427,9 +438,9 @@ class FlowWorker:
                     self.db.set_state('budget_pause_reason','secondary_ws_bytes')
                     self.finalize(False);await asyncio.sleep(60);continue
                 try:
-                    routed=provider(self.providers.ws(self.ws_provider))
+                    routed=provider(self.ws_url())
                     self.db.count('flow_wss_connections_'+routed)
-                    async with connect(self.providers.ws(self.ws_provider),open_timeout=20,ping_interval=20,ping_timeout=20,
+                    async with connect(self.ws_url(),open_timeout=20,ping_interval=20,ping_timeout=20,
                                        max_size=65536,max_queue=4,compression=None) as self.socket:
                         self.reader=asyncio.create_task(self.read_socket());self.subscriptions={};self.routes={}
                         if await self.command('eth_chainId',[])!=hex(self.config.chain_id):raise RpcError('Wrong WS chain')

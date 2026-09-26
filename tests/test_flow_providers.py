@@ -31,7 +31,7 @@ class FlowProviderTests(unittest.TestCase):
     def test_new_secondary_cap_ignores_legacy_setting(self):
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'flow.env'
-            path.write_text('FLOW_MAX_WS_BYTES_PER_DAY=8000000\nFLOW_SECONDARY_WS_BYTES_PER_DAY=64000000\n')
+            path.write_text('FLOW_PROVIDER_SPLIT_ENABLED=true\nFLOW_MAX_WS_BYTES_PER_DAY=8000000\nFLOW_SECONDARY_WS_BYTES_PER_DAY=64000000\n')
             path.chmod(0o600)
             with patch.dict(os.environ,{'FLOW_ENV':str(path)}):
                 self.assertEqual(FlowSettings.load().daily_ws_bytes,64_000_000)

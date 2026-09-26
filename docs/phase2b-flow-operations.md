@@ -23,7 +23,7 @@ command lines, reports or Git. Private production HTTP/WSS validation reuses Con
 | FLOW_MAX_HTTP_CALLS_PER_DAY | 1000 | RPC **members/attempts**, including retries and batch members |
 | FLOW_MAX_HTTP_CALLS_PER_MINUTE | 12 | Persisted UTC-minute member limit |
 | FLOW_MAX_RECOVERY_GETLOGS_PER_DAY | 400 | Persisted UTC-day targeted recovery attempts |
-| Recovery replay | 2,000 blocks/query, 100,000 blocks/filter | Per-filter committed cursors and aggregate budget preflight; old `FLOW_RECOVERY_MAX_BLOCKS` is obsolete |
+| Normal recovery replay | 10 blocks/query, 100 blocks/filter | Per-filter committed cursors; larger historical catch-up uses the separate [shadow-first migration](phase2b2-provider-migration.md) while the old flow service runs |
 | FLOW_SECONDARY_WS_BYTES_PER_DAY | 64000000 | Persisted PublicNode/Validation received-message bytes, resets at UTC midnight |
 | FLOW_TX_ENRICHMENT_ENABLED | false | Enabling is rejected in this release |
 
