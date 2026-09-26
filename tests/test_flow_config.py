@@ -2,8 +2,9 @@ import os
 from pathlib import Path
 import stat
 import tempfile
+import types
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.flow_config import atomic_split_update, no_network_probe, prestart_check
 from app.flow_providers import FlowProviders
@@ -109,3 +110,28 @@ class FlowConfigTests(unittest.IsolatedAsyncioTestCase):
         with patch('app.flow_config.FlowSettings.load', return_value=settings):
             with self.assertRaises(ValueError):
                 await no_network_probe(require_split=True)
+
+    async def test_unreadable_config_blocks_guarded_flow_stop(self):
+        import importlib
+        import sys
+        with patch.dict(sys.modules, {'_bootstrap': types.ModuleType('_bootstrap')}):
+            script = importlib.import_module('scripts.phase2b2_shadow')
+        runner = MagicMock()
+        runner.meta.side_effect = {'git_revision': 'checked', 'main_pid': '1',
+                                   'old_flow_pid': '2', 'H_pre_stop': '3'}.get
+        runner.complete.return_value = True
+        runner.worker.rpc.close = AsyncMock()
+        old_rpc = MagicMock()
+        old_rpc.close = AsyncMock()
+        with patch.object(script, 'verified_checkout', return_value='checked'), \
+             patch.object(script, 'service', side_effect=[{'ActiveState': 'active', 'MainPID': '1'},
+                                                         {'ActiveState': 'active', 'MainPID': '2'}]), \
+             patch.object(script.FlowSettings, 'load', return_value=FlowSettings(split_enabled=True)), \
+             patch.object(script, 'FlowDB'), patch.object(script.Config, 'load'), \
+             patch.object(script.FlowProviders, 'load'), \
+             patch.object(script, 'make_reconciler', return_value=(runner, old_rpc)), \
+             patch.object(script, 'prestart_check', new_callable=AsyncMock, side_effect=ValueError('unreadable')), \
+             patch.object(script.subprocess, 'run') as stop:
+            with self.assertRaises(ValueError):
+                await script.operate('stop-flow')
+            stop.assert_not_called()
