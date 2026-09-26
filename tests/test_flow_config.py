@@ -84,7 +84,7 @@ class FlowConfigTests(unittest.IsolatedAsyncioTestCase):
             stop.assert_not_called()
 
     async def test_no_network_probe_validates_candidate_worker(self):
-        settings = FlowSettings(database=self.root / 'flow.db')
+        settings = FlowSettings(database=self.root / 'flow.db', split_enabled=False)
         config = type('ConfigStub', (), {'chain_id': 4663})()
         providers = FlowProviders('https://mainnet.robinhood.validationcloud.io/v1/test',
                                   'wss://mainnet.robinhood.validationcloud.io/v1/test')
