@@ -4,9 +4,10 @@ import stat
 import tempfile
 import types
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.flow_config import atomic_split_update, no_network_probe, prestart_check
+from app.flow_config import atomic_split_update, no_network_probe, prestart_check, service_identity
 from app.flow_providers import FlowProviders
 from app.flow_worker import FlowSettings
 
@@ -28,6 +29,12 @@ class FlowConfigTests(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_systemd_group_not_assumed_to_be_account_primary_group(self):
+        with patch('app.flow_config.subprocess.check_output', return_value='User=ubuntu\nGroup=flow\n'), \
+             patch('pwd.getpwnam', return_value=SimpleNamespace(pw_uid=1000, pw_gid=1000)), \
+             patch('grp.getgrnam', return_value=SimpleNamespace(gr_gid=1001)):
+            self.assertEqual(service_identity()[1:], (1000, 1001))
 
     def test_atomic_root_style_temp_gets_service_owner_and_mode(self):
         original = os.fchown

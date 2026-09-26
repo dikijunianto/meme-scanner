@@ -30,9 +30,7 @@ def service_identity():
     if not user or not unit.get('Group'):
         raise ValueError('Flow service identity is missing')
     identity = pwd.getpwnam(user)
-    if identity.pw_gid != grp.getgrnam(unit['Group']).gr_gid:
-        raise ValueError('Flow service group differs from account group')
-    return unit, identity.pw_uid, identity.pw_gid
+    return unit, identity.pw_uid, grp.getgrnam(unit['Group']).gr_gid
 
 
 def readable_as_service(path, user):
