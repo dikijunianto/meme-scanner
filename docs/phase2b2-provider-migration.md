@@ -187,14 +187,51 @@ instead of replaying those same ranges against a later moving head. Older or
 unproved gaps remain unresolved. A failed or interrupted promotion publishes
 no handoff marker.
 
-After both tails are verified, observe at least 30 minutes. Require the new
-flow process to report zero Alchemy HTTP requests, WSS connections, and WSS
-bytes; PublicNode WSS bytes and Validation HTTP/getLogs calls must be recorded.
-Confirm new raw events and feature targets progress, zero per-event
-transaction/receipt lookups, no legacy 8 MB pause, no journal credential leaks,
-both DB integrity checks `ok`, main PID/restart count unchanged, and Phase 1.6
-and Phase 2A healthy. Fallback WSS remains test-verified unless natural failover
-occurs. Only then report `READY_24H_SOAK`. No Phase 2C or trading change.
+After ready-tail proof, new sessions enter `POST_CUTOVER_VALIDATING`; they do
+not become `COMPLETE`. Observe at least 30 minutes. A connected PublicNode
+primary or a fully proved Validation fallback is acceptable. Require zero
+Phase 2B Alchemy HTTP requests, WSS connections, and WSS bytes; no unresolved
+active or provider-switch gap; healthy bootstrap/recovery; raw event persistence
+when events occur and feature progress when due; zero per-event transaction or
+receipt lookups; both DB integrity checks `ok`; a clean security review; and
+unchanged main PID/restart count, Phase 1.6, and Phase 2A. The 64,000,000
+bytes/day emergency WSS ceiling remains in force; the old Alchemy 8 MB pause
+does not apply to split routing. A reviewed acceptance record advances to
+`SOAKING` and yields `READY_24H_SOAK`. Only a reviewed successful 24-hour soak
+advances to `COMPLETE`. No Phase 2C or trading change.
+
+PublicNode disconnects are recorded with connection and subscription markers.
+The existing two-failure policy selects Validation WSS; there is no automatic
+failback to PublicNode and no Alchemy fallback. After the new subscription ACK,
+the flow worker freezes a Validation HTTP head, proves the uncertain interval
+with bounded, adaptive, durable getLogs jobs, and canonically deduplicates
+HTTP/WSS overlap. Only zero unresolved ranges and resolved gap IDs mark the
+switch healthy. A switch with zero active filters records that fact and uses no
+getLogs. Until proof finishes, feature completeness stays pending. A failed
+switch, both providers unavailable, repeated provider flapping, or an active
+unresolved gap blocks acceptance. A future failback must use this same proof.
+
+The 24-hour review records PublicNode disconnects/reconnects, fallback
+activations, time on each provider, switch recovery calls/events, unresolved
+ranges, failbacks/flapping, WSS bytes by provider, Validation HTTP usage, and
+zero Phase 2B Alchemy traffic. The provider switch report and usage report
+expose these fields without making RPC calls. The historical `a330fee593134e51b65511ce6f07d2e7`
+handoff remains `COMPLETE` under its old semantics; its later operational
+rollback is stored in a separate append-only outcome row. No H_* or proof row
+is changed. New sessions can record rollback intent during validation or soak;
+after flow-only legacy restoration, a connected Alchemy route with healthy
+recovery and zero active gaps records the rollback PID and reconciliation proof.
+The source-only schema step is `scripts/phase2b2_shadow.py migrate-session-schema`;
+it requires both legacy services active and split disabled. On the known
+historical rollback, `record-historical-rollback --session-id
+a330fee593134e51b65511ce6f07d2e7 --reason
+primary_wss_validation_policy/provider_disconnect` appends its outcome only
+after read-only DB/service checks. Future reviewed 30-minute and 24-hour
+decisions use `accept-validation --evidence-file <reviewed-json>` and
+`complete-soak --evidence-file <reviewed-json>` respectively. These commands
+perform no operator RPC calls and reject unhealthy routing, unresolved switch
+proofs, or Alchemy traffic. Never infer a provider close cause from a generic
+`RpcError`; the September 27 journals did not include a close code or reason.
 
 ## Missing-cursor proof bootstrap (legacy route)
 

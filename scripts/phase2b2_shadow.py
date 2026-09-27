@@ -14,7 +14,8 @@ from websockets.asyncio.client import connect
 
 from app.config import ROOT, Config
 from app.flow_cutover import (advance as advance_cutover,
-                              abort_pre_stop, authorize_stop,
+                              abort_pre_stop, accept_validation, authorize_stop,
+                              complete_soak, rollback_intent, record_operational_outcome,
                               create as create_cutover, current as active_cutover,
                               gap_counts, import_rolled_back_legacy,
                               mark_source_stopped, mark_stop_issued,
@@ -28,6 +29,7 @@ from app.flow_config import (candidate_split_preflight,candidate_split_status,
                              prestart_check,safe_split_fingerprint)
 from app.flow_data import BUY, SELL, FlowDB
 from app.flow_providers import FlowProviders
+from app.flow_provider_switch import acceptable_route, report as provider_switch_report
 from app.flow_shadow import make_reconciler, verified_checkout
 from app.flow_worker import FlowSettings, filter_queries
 from app.rpc import RpcError
@@ -118,7 +120,7 @@ async def chain_ids(config,providers):
     return result
 
 
-async def operate(mode,reason=None):
+async def operate(mode,reason=None,session_id=None,evidence_path=None):
     if mode=='status':
         # Status must not construct a writer, create schema, or contact a provider.
         settings=FlowSettings.load()
@@ -145,7 +147,8 @@ async def operate(mode,reason=None):
                                              'STOP_AUTHORIZED','SOURCE_STOPPED','STOP_TAIL_VERIFIED')
                             else True if phase in ('SPLIT_CONFIGURED','SPLIT_WSS_CONNECTING',
                                                    'SUBSCRIPTIONS_READY','READY_TAIL_PENDING',
-                                                   'READY_TAIL_VERIFIED') else None)
+                                                   'READY_TAIL_VERIFIED','POST_CUTOVER_VALIDATING',
+                                                   'SOAKING') else None)
             reasons=[]
             if providers is None:reasons.append('provider_config_invalid')
             if expected_split is not None and settings.split_enabled!=expected_split:
@@ -179,7 +182,8 @@ async def operate(mode,reason=None):
     if mode=='ready-tail' and flow['ActiveState']!='active':
         raise RpcError('New flow is not active')
     settings=FlowSettings.load()
-    if mode in ('archive-legacy','new-session','abort-session','migrate-session-schema'):
+    if mode in ('archive-legacy','new-session','abort-session','migrate-session-schema',
+                'record-historical-rollback'):
         if (main['ActiveState']!='active' or flow['ActiveState']!='active' or
             settings.split_enabled):
             raise RpcError('Legacy services and routing required')
@@ -196,6 +200,25 @@ async def operate(mode,reason=None):
                 cutover_schema(db)
                 return {'gate':'SESSION_SCHEMA_READY','active_session':bool(active_cutover(db)),
                         'flow_integrity':db.conn.execute('PRAGMA integrity_check').fetchone()[0]}
+            if mode=='record-historical-rollback':
+                if not session_id or not reason or active_cutover(db):
+                    raise RpcError('Explicit terminal session and rollback reason required')
+                row=db.conn.execute('SELECT payload,status FROM flow_cutover_sessions WHERE id=?',
+                                    (session_id,)).fetchone()
+                if not row or row['status']!='COMPLETE':
+                    raise RpcError('Historical completed handoff was not found')
+                value=json.loads(row['payload'])
+                if (db.state('service_status')!='connected' or
+                    db.state('connection_state')!='connected' or gap_counts(db)[0]):
+                    raise RpcError('Legacy rollback health is not proven')
+                outcome=record_operational_outcome(db,value,reason=reason,
+                    rollback_pid=flow['MainPID'],provider='validation',
+                    reconciliation_proof={'legacy_route_connected':True,'active_unresolved_gaps':0,
+                                          'main_integrity':'ok','flow_integrity':'ok',
+                                          'operator_rollback_pid':flow['MainPID']})
+                return {'gate':'HISTORICAL_ROLLBACK_RECORDED','session_id':session_id,
+                        'rollback_pid':outcome['rollback_pid'],
+                        'proof_payload_sha256':outcome['proof_payload_sha256']}
             if mode=='abort-session':
                 row=active_cutover(db)
                 if not row:raise RpcError('No active session to abort')
@@ -235,6 +258,50 @@ async def operate(mode,reason=None):
                     'source_legacy_pid':value['source_legacy_pid'],
                     'H_prefetch':None,'H_stop':None,'H_live':None,'target_filters':0,
                     'fresh_jobs':0,'fresh_ranges':0}
+        finally:db.conn.close()
+    if mode in ('accept-validation','complete-soak','rollback-intent'):
+        if not settings.split_enabled or flow['ActiveState']!='active':
+            raise RpcError('Live split flow is required')
+        db=FlowDB(settings.database)
+        try:
+            row=active_cutover(db)
+            if not row:raise RpcError('No active post-cutover session')
+            value=json.loads(row['payload'])
+            if (value['revision']!=revision or value['main_pid']!=main['MainPID'] or
+                value.get('split_pid')!=flow['MainPID'] or
+                db.conn.execute('PRAGMA integrity_check').fetchone()[0]!='ok'):
+                raise RpcError('Post-cutover identity or DB integrity changed')
+            if mode=='rollback-intent':
+                switches=provider_switch_report(db,session_id=value['id'])
+                recorded=rollback_intent(db,value,reason=reason,
+                    provider=db.state('current_wss_provider'),
+                    unresolved_ranges=[r for switch in switches['switches']
+                                       for r in ((switch.get('recovery') or {}).get('unresolved_ranges') or
+                                                 ([] if switch['state']=='HEALTHY' else switch['filters']))])
+                return {'gate':'POST_CUTOVER_ROLLBACK_INTENT','id':recorded['id'],
+                        'reason':recorded['rollback_intent']['reason']}
+            if not evidence_path:raise RpcError('Reviewed acceptance evidence file is required')
+            with open(evidence_path,encoding='utf-8') as evidence_file:
+                evidence=json.load(evidence_file)
+            switches=provider_switch_report(db,session_id=value['id'])
+            from datetime import datetime
+            since=int(datetime.fromisoformat(value['source_stopped_at']).timestamp())//60*60
+            forbidden=sum(db.used(metric,since) for metric in
+                          ('flow_http_calls_alchemy','flow_wss_connections_alchemy','flow_ws_bytes_alchemy'))
+            if (not acceptable_route(db,value['id']) or
+                db.state('recovery_state')!='healthy' or
+                switches['provider_switch_pending'] or switches['provider_switch_failed'] or
+                switches['provider_switch_unresolved_ranges'] or gap_counts(db)[0] or forbidden or
+                db.used('flow_eth_getTransactionByHash',since) or
+                db.used('flow_eth_getTransactionReceipt',since)):
+                raise RpcError('Post-cutover acceptance invariants failed')
+            with closing(sqlite3.connect(Config.load().database.resolve().as_uri()+'?mode=ro',uri=True)) as source:
+                if source.execute('PRAGMA integrity_check').fetchone()[0]!='ok':
+                    raise RpcError('Main DB integrity failed')
+            result=accept_validation(db,value,evidence) if mode=='accept-validation' else complete_soak(db,value,evidence)
+            return {'gate':'READY_24H_SOAK' if mode=='accept-validation' else 'MIGRATION_COMPLETE',
+                    'id':result['id'],'session_phase':result['state'],
+                    'current_wss_provider':db.state('current_wss_provider')}
         finally:db.conn.close()
     if mode in ('prefetch','preflight','authorize-stop','stop-flow','stop-tail') and settings.split_enabled:
         raise RpcError('Old flow routing flag unexpectedly enabled')
@@ -501,10 +568,14 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('mode',choices=('archive-legacy','migrate-session-schema','new-session',
                                         'abort-session','prefetch','preflight','authorize-stop',
-                                        'stop-flow','stop-tail','ready-tail','status'))
-    parser.add_argument('--reason',help='Short reason when aborting a pre-stop session')
+                                        'stop-flow','stop-tail','ready-tail','status',
+                                        'accept-validation','complete-soak','rollback-intent',
+                                        'record-historical-rollback'))
+    parser.add_argument('--reason',help='Short abort or rollback reason')
+    parser.add_argument('--session-id',help='Exact historical session for append-only outcome')
+    parser.add_argument('--evidence-file',help='Reviewed, local JSON acceptance evidence')
     args=parser.parse_args()
-    try:print(json.dumps(asyncio.run(operate(args.mode,args.reason)),indent=2))
+    try:print(json.dumps(asyncio.run(operate(args.mode,args.reason,args.session_id,args.evidence_file)),indent=2))
     except Exception as exc:
         # Never print exception text: provider errors can contain credentials.
         print(json.dumps({'gate':'MIGRATION_BLOCKED','error_type':type(exc).__name__}))

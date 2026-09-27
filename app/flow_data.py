@@ -178,6 +178,8 @@ class FlowDB:
           PRIMARY KEY(stage,launch_id,kind));
         ''')
         self.conn.commit()
+        from app.flow_cutover import schema as cutover_schema
+        cutover_schema(self)
 
     def require_bootstrap(self,target,kind,safe_start):
         """Make unknown completeness durable before a target can claim coverage."""

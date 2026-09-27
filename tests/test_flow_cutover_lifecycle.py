@@ -8,9 +8,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from app.flow_cutover import (abort_empty,abort_pre_stop,advance,authorize_stop,create,current,
+from app.flow_cutover import (ACCEPTANCE,abort_empty,abort_pre_stop,accept_validation,advance,
+                              authorize_stop,begin_validation,complete_soak,create,current,
                               import_rolled_back_legacy,legacy_digest,mark_source_stopped,
-                              mark_split_configured,mark_stop_issued,new,require_phase_pid,
+                              mark_split_configured,mark_stop_issued,new,record_operational_outcome,
+                              record_rollback,rollback_intent,require_phase_pid,
                               save,schema,status)
 from app.flow_data import FlowDB
 
@@ -231,6 +233,66 @@ class SessionLifecycleTests(unittest.TestCase):
                        {'source_pid':'1963150','source_start':'100','route':'alchemy','split':True}):
             with self.assertRaises(ValueError):abort_pre_stop(self.db,fresh,'invalid',**kwargs)
         self.assertEqual(current(self.db)['id'],fresh['id'])
+
+    def test_validation_soak_and_completion_require_elapsed_reviewed_evidence(self):
+        self.archive();fresh=self.fresh()
+        ready=advance(self.db,fresh,'READY_TAIL_VERIFIED',ready_tail_proof='verified')
+        validating=begin_validation(self.db,ready)
+        self.assertEqual(status(self.db)['current_active']['session_phase'],'POST_CUTOVER_VALIDATING')
+        evidence={key:True for key in ACCEPTANCE}
+        with self.assertRaises(ValueError):accept_validation(self.db,validating,evidence,
+            now=validating['validation_started_at']+1799)
+        with self.assertRaises(ValueError):accept_validation(self.db,validating,dict(evidence,no_alchemy=False),
+            now=validating['validation_started_at']+1800)
+        soaking=accept_validation(self.db,validating,evidence,now=validating['validation_started_at']+1800)
+        self.assertEqual(soaking['state'],'SOAKING')
+        with self.assertRaises(ValueError):complete_soak(self.db,soaking,evidence,
+            now=soaking['soak_started_at']+86399)
+        complete=complete_soak(self.db,soaking,evidence,now=soaking['soak_started_at']+86400)
+        self.assertEqual(complete['state'],'COMPLETE')
+        self.assertIsNone(current(self.db))
+
+    def test_post_handoff_rollback_from_validation_and_soak(self):
+        self.archive()
+        for soak in (False,True):
+            fresh=self.fresh()
+            ready=advance(self.db,fresh,'READY_TAIL_VERIFIED',ready_tail_proof='verified',
+                          split_pid='2000000')
+            validating=begin_validation(self.db,ready)
+            state=accept_validation(self.db,validating,{key:True for key in ACCEPTANCE},
+                now=validating['validation_started_at']+1800) if soak else validating
+            intent=rollback_intent(self.db,state,reason='provider_switch_unproved',
+                provider='validation',unresolved_ranges=[[1,'curve',10,20]])
+            with self.assertRaises(ValueError):record_rollback(self.db,intent,'3000000')
+            rolled=record_rollback(self.db,intent,'3000000',proof={
+                'legacy_route_connected':True,'active_unresolved_gaps':0,
+                'recovery_state':'healthy'})
+            self.assertEqual(rolled['state'],'ROLLED_BACK')
+            self.assertEqual(rolled['source_legacy_pid'],'1963150')
+            self.assertEqual(rolled['split_pid'],'2000000')
+            self.assertEqual(rolled['rollback_pid'],'3000000')
+            self.assertEqual(rolled['provider_at_failure'],'validation')
+            self.assertEqual(status(self.db)['historical_latest_terminal']['operational_outcome']
+                             ['rollback_reason'],'provider_switch_unproved')
+
+    def test_completed_legacy_handoff_accepts_append_only_later_outcome(self):
+        self.archive();fresh=self.fresh()
+        complete=advance(self.db,fresh,'COMPLETE',ready_tail_proof='verified',
+                         H_prefetch=10,H_stop=14,H_live=16,split_pid='2000000')
+        before=self.db.conn.execute('SELECT payload FROM flow_cutover_sessions WHERE id=?',
+                                    (fresh['id'],)).fetchone()[0]
+        proof={'zero_active_filters':True,'rollback_gap_seconds':13.2}
+        first=record_operational_outcome(self.db,complete,reason='primary_wss_validation_policy/provider_disconnect',
+            rollback_pid='2091349',provider='validation',reconciliation_proof=proof)
+        self.assertEqual(record_operational_outcome(self.db,complete,
+            reason='primary_wss_validation_policy/provider_disconnect',rollback_pid='2091349',
+            provider='validation',reconciliation_proof=proof),first)
+        self.assertEqual(self.db.conn.execute('SELECT payload FROM flow_cutover_sessions WHERE id=?',
+                                             (fresh['id'],)).fetchone()[0],before)
+        reported=status(self.db)['historical_latest_terminal']
+        self.assertEqual(reported['status'],'COMPLETE')
+        self.assertTrue(reported['operational_outcome']['later_operational_rollback'])
+        self.assertEqual(reported['operational_outcome']['rollback_pid'],'2091349')
 
 
 if __name__=='__main__':unittest.main()

@@ -78,6 +78,11 @@ def usage(db,settings,hours=24,now=None,providers=None):
     from app.flow_cutover import gap_counts, session as cutover_session
     active_gaps,historical_gaps=gap_counts(db)
     cutover=cutover_session(db)
+    from app.flow_provider_switch import report as switch_report
+    switches=switch_report(db,session_id=cutover['id'] if cutover else None)
+    outcome=db.conn.execute('SELECT * FROM flow_cutover_outcomes WHERE session_id=?',
+                            (cutover['id'],)).fetchone() if cutover and db.conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='flow_cutover_outcomes'").fetchone() else None
     return {'hours':hours,'as_of':iso(now),'tracked_launches':targets[0],'initial_cohort_tracked':targets[1],'long_cohort_tracked':targets[2],
             'target_status_all_time':status,'events_in_period':events,'raw_rows_all_time':c.execute('SELECT count(*) FROM flow_events').fetchone()[0],
             'coverage':coverage,'windows':windows,'active_average':samples[0],'active_peak':samples[1],'subscriptions_average':samples[2],
@@ -86,8 +91,12 @@ def usage(db,settings,hours=24,now=None,providers=None):
             'phase2b_coverage_start_at':db.state('phase2b_coverage_start_at'),'service_status':db.state('service_status'),
             'connection_state':db.state('connection_state'),'recovery_state':db.state('recovery_state'),
             'cutover_state':cutover['state'].lower() if cutover else None,
+            'session_phase':cutover['state'] if cutover else None,
+            'operational_outcome':dict(outcome) if outcome else None,
             'active_unresolved_gap_count':active_gaps,'historical_unresolved_gap_count':historical_gaps,
             'routing':{'current_wss_provider':db.state('current_wss_provider'),
+                       'primary_provider':'publicnode' if providers else None,
+                       'fallback_provider':'validation' if providers else None,
                        'wss_primary_provider':'publicnode' if providers else None,
                        'wss_fallback_provider':'validation' if providers else None,
                        'http_provider':'validation' if providers else None,
@@ -106,6 +115,7 @@ def usage(db,settings,hours=24,now=None,providers=None):
                        'flow_alchemy_wss_bytes':counters['flow_ws_bytes_alchemy'],
                        'budget_pause_reason':db.state('budget_pause_reason'),
                        'budget_pause_provider':db.state('budget_pause_provider')},
+            'provider_switch':switches,
             'billing':'local counters only; no provider billing or remaining-quota data',
             'sample_note':'30-second gauges; projections include allocated DB/WAL overhead, not raw bytes/event'}
 

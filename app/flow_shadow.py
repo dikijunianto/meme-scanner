@@ -266,6 +266,7 @@ class ShadowReconciler:
             last=job['reconciliation_upper_bound']
             graduation=json.loads(target['graduation_json']) if target['graduation_json'] else None
             while current<=last:
+                if getattr(self.worker,'connected',False):self.worker.drain()
                 end=min(last,current+span-1)
                 self.worker.rpc.job=key
                 try:
@@ -282,6 +283,7 @@ class ShadowReconciler:
                     continue
                 except FlowBudget as exc:
                     if 'minute' in str(exc):
+                        if getattr(self.worker,'connected',False):self.worker.drain()
                         await asyncio.sleep(60-time.time()%60+.05)
                         continue
                     return False
@@ -319,6 +321,7 @@ class ShadowReconciler:
                        self.db.used(f'flow_shadow_events_stored:{scoped}:{job["launch_id"]}:{job["kind"]}',0),
                        self.db.used(f'flow_shadow_duplicates:{scoped}:{job["launch_id"]}:{job["kind"]}',0),*key))
                 current=end+1
+                if getattr(self.worker,'connected',False):self.worker.drain()
             self.worker.rpc.job=None
         return self.complete(stage)
 

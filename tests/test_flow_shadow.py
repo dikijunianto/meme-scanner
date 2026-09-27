@@ -13,6 +13,8 @@ from app.flow_data import FlowDB, decode_event
 from app.flow_providers import FlowProviders, provider
 from app.flow_shadow import CUTOVER_RESERVE, SHADOW_SPAN, make_reconciler, verified_checkout
 from app.flow_worker import FlowSettings
+from app import flow_provider_switch as provider_switch
+from app.flow_cutover import session
 from app.rpc import Rpc, RpcError, RetryableRpcError
 from tests.test_flow import event, insert_target, main_schema, target
 
@@ -54,6 +56,15 @@ class ShadowTests(unittest.IsolatedAsyncioTestCase):
         self.patch.start();self.addCleanup(self.patch.stop)
         return calls
 
+    def validating_session(self):
+        value={'id':'switch-test','state':'POST_CUTOVER_VALIDATING',
+               'ready_tail_proof':'verified','validation_started_at':100}
+        with self.db.conn:self.db.conn.execute('''INSERT INTO flow_cutover_sessions
+            (id,created_at_utc,deploy_git_revision,source_route,source_legacy_pid,status,payload)
+            VALUES(?,?,?,?,?,?,?)''',('switch-test','2026-09-27T00:00:00Z','test',
+                  'alchemy','10','POST_CUTOVER_VALIDATING',json.dumps(value)))
+        return value
+
     async def test_354_block_shadow_replay_deduplicates_and_keeps_runtime_limit(self):
         head=self.base+354
         rows=[]
@@ -76,6 +87,62 @@ class ShadowTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(max(last-first+1 for first,last in calls),SHADOW_SPAN)
         self.assertEqual(self.db.used('flow_shadow_eth_getLogs_validation',0),1)
         self.assertEqual(self.db.used('flow_eth_getLogs',0),1)
+
+    async def test_live_primary_disconnect_fallback_http_proof_deduplicates_overlap(self):
+        active=self.validating_session()
+        worker=self.runner.worker
+        worker.settings=replace(worker.settings,split_enabled=True)
+        worker.connected=True;worker.ws_provider='validation'
+        worker.connection_started_at=1
+        worker.subscriptions={(1,'curve'):'fallback-sub'}
+        self.db.set_state('current_wss_provider','validation')
+        self.db.set_state('connection_state','connected')
+        self.db.set_state('service_status','provider_switch_pending')
+        self.db.set_state('recovery:1:curve',self.base)
+        row=event(self.t,index=1);row['blockNumber']=hex(self.base)
+        self.assertTrue(worker.ingest(self.t,copy.deepcopy(row)))
+        self.db.gap(1,1000,1001,'ws_gap',self.base)
+        gap_id=self.db.conn.execute('SELECT max(id) FROM flow_gaps').fetchone()[0]
+        switch_id,_=provider_switch.start(self.db,'publicnode',worker.switch_filters(),
+                                          [gap_id],session_id=active['id'],now=100)
+        provider_switch.failover_pending(self.db,switch_id,'RpcError')
+        provider_switch.connected(self.db,switch_id,'validation',1,105)
+        calls=self.mock_rpc(self.base+3,[row])
+        await worker.prove_provider_switch()
+        proof=provider_switch.latest(self.db,active['id'])
+        self.assertEqual(proof['state'],'HEALTHY')
+        self.assertEqual(provider_switch.value(proof)['recovery']['duplicates'],1)
+        self.assertEqual(provider_switch.value(proof)['recovery']['recovered_events'],0)
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_events').fetchone()[0],1)
+        self.assertEqual(self.db.conn.execute('SELECT resolved FROM flow_gaps WHERE id=?',
+                                             (gap_id,)).fetchone()[0],1)
+        self.assertTrue(calls)
+        self.assertEqual(self.db.used('flow_eth_getLogs_validation',0),len(calls))
+        self.assertEqual(self.db.used('flow_http_calls_alchemy',0),0)
+        self.assertEqual(session(self.db)['state'],'POST_CUTOVER_VALIDATING')
+
+    async def test_provider_switch_empty_http_range_is_still_proved(self):
+        active=self.validating_session()
+        worker=self.runner.worker
+        worker.settings=replace(worker.settings,split_enabled=True)
+        worker.connected=True;worker.ws_provider='validation'
+        worker.connection_started_at=1
+        worker.subscriptions={(1,'curve'):'fallback-sub'}
+        self.db.set_state('recovery:1:curve',self.base)
+        self.db.gap(1,1000,1001,'ws_gap',self.base)
+        gap_id=self.db.conn.execute('SELECT max(id) FROM flow_gaps').fetchone()[0]
+        switch_id,_=provider_switch.start(self.db,'publicnode',worker.switch_filters(),
+                                          [gap_id],session_id=active['id'],now=100)
+        provider_switch.failover_pending(self.db,switch_id,'RpcError')
+        provider_switch.connected(self.db,switch_id,'validation',1,105)
+        calls=self.mock_rpc(self.base+3,[])
+        await worker.prove_provider_switch()
+        proof=provider_switch.latest(self.db,active['id'])
+        self.assertEqual(proof['state'],'HEALTHY')
+        self.assertEqual(provider_switch.value(proof)['recovery']['recovered_events'],0)
+        self.assertTrue(calls)
+        self.assertEqual(self.db.conn.execute('SELECT resolved FROM flow_gaps WHERE id=?',
+                                             (gap_id,)).fetchone()[0],1)
 
     async def test_adaptive_reduction_and_successful_empty_range(self):
         calls=self.mock_rpc(self.base+354,reject_above=100)

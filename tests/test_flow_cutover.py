@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 from app.config import Config
 from app.flow_config import safe_split_fingerprint
-from app.flow_cutover import advance, create, gap_counts, new, save, schema, session
+from app.flow_cutover import advance, create, gap_counts, new, record_rollback, save, schema, session
 from app.flow_data import FlowDB
 from app.flow_providers import FlowProviders
 from app.flow_shadow import make_reconciler
@@ -169,7 +169,7 @@ class CutoverTests(unittest.IsolatedAsyncioTestCase):
         self.runner.promote('wss_ready_tail')
         self.assertEqual(session(self.db)['state'],'READY_TAIL_VERIFIED')
         await self.worker.reconcile()
-        self.assertEqual(session(self.db)['state'],'NORMAL_CONNECTED')
+        self.assertEqual(session(self.db)['state'],'POST_CUTOVER_VALIDATING')
         self.assertEqual(self.db.state('service_status'),'connected')
         self.assertEqual(len(calls),before+1)
         self.assertEqual(self.db.used('flow_eth_getTransactionByHash',0),0)
@@ -269,6 +269,11 @@ class CutoverTests(unittest.IsolatedAsyncioTestCase):
         try:
             with patch('app.flow_worker.connect',return_value=Cancel()):
                 with self.assertRaises(asyncio.CancelledError):await legacy.run()
+            # A cancellation before legacy chain ACK cannot prove rollback.
+            self.assertEqual(session(self.db)['state'],'READY_TAIL_PENDING')
+            record_rollback(self.db,session(self.db),'3000000',proof={
+                'legacy_route_connected':True,'active_unresolved_gaps':0,
+                'recovery_state':'healthy'})
             self.assertEqual(session(self.db)['state'],'ROLLED_BACK')
         finally:
             await legacy.rpc.close();legacy.main.close()
@@ -305,7 +310,7 @@ class CutoverTests(unittest.IsolatedAsyncioTestCase):
             replacement.subscriptions[(1,'curve')]='ack'
             replacement.discover=AsyncMock()
             await replacement.reconcile()
-            self.assertEqual(session(self.db)['state'],'NORMAL_CONNECTED')
+            self.assertEqual(session(self.db)['state'],'POST_CUTOVER_VALIDATING')
             self.assertEqual(self.db.state('recovery:1:curve'),str(self.base+10))
         finally:
             await replacement.rpc.close();replacement.main.close()

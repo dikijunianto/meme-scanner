@@ -12,7 +12,7 @@ PENDING = {'SOURCE_STOPPED', 'STOP_TAIL_VERIFIED', 'SPLIT_CONFIGURED',
            'READY_TAIL_PENDING'}
 PRE_STOP = {'CREATED','SHADOW_IN_PROGRESS','SHADOW_VERIFIED','STOP_AUTHORIZED'}
 ACTIVE = {*PRE_STOP, *PENDING,
-          'READY_TAIL_VERIFIED'}
+          'READY_TAIL_VERIFIED', 'POST_CUTOVER_VALIDATING', 'SOAKING'}
 TERMINAL = {'COMPLETE', 'FAILED', 'ROLLED_BACK', 'ABORTED_PRE_STOP', 'ARCHIVED'}
 
 
@@ -45,11 +45,31 @@ def schema(db):
          'SOURCE_STOPPED','STOP_TAIL_VERIFIED','SPLIT_CONFIGURED',
          'SPLIT_WSS_CONNECTING','SUBSCRIPTIONS_READY','READY_TAIL_PENDING',
          'READY_TAIL_VERIFIED')''')
+        db.conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS one_active_flow_cutover_v3
+        ON flow_cutover_sessions((1)) WHERE status IN
+        ('CREATED','SHADOW_IN_PROGRESS','SHADOW_VERIFIED','STOP_AUTHORIZED',
+         'SOURCE_STOPPED','STOP_TAIL_VERIFIED','SPLIT_CONFIGURED',
+         'SPLIT_WSS_CONNECTING','SUBSCRIPTIONS_READY','READY_TAIL_PENDING',
+         'READY_TAIL_VERIFIED','POST_CUTOVER_VALIDATING','SOAKING')''')
         db.conn.execute('''CREATE TABLE IF NOT EXISTS flow_cutover_legacy_proof(
           session_id TEXT NOT NULL,proof_table TEXT NOT NULL,stage TEXT NOT NULL,
           launch_id INTEGER NOT NULL,kind TEXT NOT NULL,first_block INTEGER NOT NULL,
           last_block INTEGER NOT NULL,
           PRIMARY KEY(proof_table,stage,launch_id,kind,first_block,last_block))''')
+        db.conn.execute('''CREATE TABLE IF NOT EXISTS flow_cutover_outcomes(
+          session_id TEXT PRIMARY KEY,recorded_at_utc TEXT NOT NULL,
+          handoff_completed INTEGER NOT NULL,later_operational_rollback INTEGER NOT NULL,
+          rollback_reason TEXT NOT NULL,rollback_pid TEXT NOT NULL,
+          rollback_route TEXT NOT NULL,provider_at_failure TEXT NOT NULL,
+          source_pid TEXT NOT NULL,split_pid TEXT,proof_payload_sha256 TEXT NOT NULL,
+          reconciliation_proof TEXT NOT NULL)''')
+        db.conn.execute('''CREATE TABLE IF NOT EXISTS flow_provider_connections(
+          id INTEGER PRIMARY KEY,session_id TEXT,provider TEXT NOT NULL,connected_at REAL NOT NULL,
+          last_seen_at REAL NOT NULL,disconnected_at REAL)''')
+        db.conn.execute('''CREATE TABLE IF NOT EXISTS flow_provider_switches(
+          id INTEGER PRIMARY KEY,session_id TEXT,state TEXT NOT NULL,payload TEXT NOT NULL)''')
+        db.conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS one_pending_provider_switch
+          ON flow_provider_switches((1)) WHERE state NOT IN ('HEALTHY','FAILED')''')
 
 
 def _exists(db):
@@ -67,7 +87,7 @@ def current(db):
     return _row(db, "status IN ('CREATED','SHADOW_IN_PROGRESS','SHADOW_VERIFIED',"
                 "'STOP_AUTHORIZED','SOURCE_STOPPED','STOP_TAIL_VERIFIED',"
                 "'SPLIT_CONFIGURED','SPLIT_WSS_CONNECTING','SUBSCRIPTIONS_READY',"
-                "'READY_TAIL_PENDING','READY_TAIL_VERIFIED')")
+                "'READY_TAIL_PENDING','READY_TAIL_VERIFIED','POST_CUTOVER_VALIDATING','SOAKING')")
 
 
 def latest_terminal(db):
@@ -82,6 +102,8 @@ def session(db):
 
 def status(db):
     """Read-only; stale terminal revisions never block inspection."""
+    outcomes={r['session_id']:dict(r) for r in db.conn.execute('SELECT * FROM flow_cutover_outcomes')} \
+        if db.conn.execute("SELECT 1 FROM sqlite_master WHERE name='flow_cutover_outcomes'").fetchone() else {}
     def view(row):
         if not row:return None
         value=json.loads(row['payload'])
@@ -104,13 +126,28 @@ def status(db):
             'stop_command_issued_at':value.get('stop_command_issued_at'),
             'source_stopped_at':value.get('source_stopped_at'),
             'candidate_config_fingerprint':value.get('candidate_config_fingerprint'),
+            'session_phase':row['status'],
+            'operational_outcome':outcomes.get(row['id']),
+            'handoff_completed':value.get('ready_tail_proof')=='verified',
+            'validation_started_at':value.get('validation_started_at'),
+            'soak_started_at':value.get('soak_started_at'),
             'authorization':value.get('authorization')}
     history=[view(dict(row)) for row in db.conn.execute(
         "SELECT * FROM flow_cutover_sessions WHERE status IN "
         "('COMPLETE','FAILED','ROLLED_BACK','ABORTED_PRE_STOP','ARCHIVED') ORDER BY rowid DESC"
     )] if _exists(db) else []
+    active=view(current(db))
+    from app.flow_provider_switch import report as switch_report
+    switches=switch_report(db,session_id=(active or (history[0] if history else {})).get('id'))
     return {'historical_latest_terminal':history[0] if history else None,
-            'historical_sessions':history,'current_active':view(current(db))}
+            'historical_sessions':history,'current_active':active,
+            'connection_state':db.state('connection_state'),
+            'current_wss_provider':db.state('current_wss_provider'),
+            'primary_provider':'publicnode','fallback_provider':'validation',
+            'provider_switch':switches,
+            **{key:switches[key] for key in ('primary_disconnect_count','fallback_activation_count',
+                'failback_count','provider_switch_pending','provider_switch_unresolved_ranges',
+                'time_on_primary','time_on_fallback')}}
 
 
 def legacy_digest(db):
@@ -231,7 +268,7 @@ def save(db, value):
             'source_route','split_role_fingerprint','created_at_utc','main_pid')):
         raise ValueError('Cutover identity is immutable')
     state=value['state']
-    status='COMPLETE' if state=='NORMAL_CONNECTED' else state
+    status=state
     if status not in ACTIVE|TERMINAL:raise ValueError('Unknown cutover state')
     db.conn.execute('''UPDATE flow_cutover_sessions SET status=?,terminal_reason=?,
       archived_at_utc=?,split_pid=?,rollback_pid=?,payload=? WHERE id=? AND status=?''',
@@ -250,6 +287,87 @@ def advance(db, value, state, **fields):
         db.conn.execute('''INSERT INTO flow_state VALUES('cutover_state',?) ON CONFLICT(key)
           DO UPDATE SET value=excluded.value''',(state.lower(),))
     return value
+
+
+def begin_validation(db, value):
+    if value['state']!='READY_TAIL_VERIFIED' or value.get('ready_tail_proof')!='verified':
+        raise ValueError('Verified ready-tail is required')
+    return advance(db,value,'POST_CUTOVER_VALIDATING',validation_started_at=time.time())
+
+
+ACCEPTANCE = ('main_unchanged','db_integrity','security_clean','tx_receipt_zero',
+              'phase1_6_healthy','phase2a_healthy','raw_when_present','features_due',
+              'no_alchemy','no_active_gaps','provider_switches_proven','no_flap')
+
+
+def accept_validation(db, value, evidence, *, now=None):
+    now=time.time() if now is None else now
+    if value['state']!='POST_CUTOVER_VALIDATING' or now-value['validation_started_at']<1800:
+        raise ValueError('Thirty-minute validation has not completed')
+    if not all(evidence.get(key) is True for key in ACCEPTANCE):
+        raise ValueError('Validation acceptance evidence is incomplete')
+    return advance(db,value,'SOAKING',soak_started_at=now,validation_evidence=evidence)
+
+
+def complete_soak(db, value, evidence, *, now=None):
+    now=time.time() if now is None else now
+    if value['state']!='SOAKING' or now-value['soak_started_at']<86400:
+        raise ValueError('Twenty-four-hour soak has not completed')
+    if not all(evidence.get(key) is True for key in ACCEPTANCE):
+        raise ValueError('Soak acceptance evidence is incomplete')
+    return advance(db,value,'COMPLETE',soak_evidence=evidence,soak_completed_at=now)
+
+
+def rollback_intent(db, value, *, reason, provider, unresolved_ranges):
+    if value['state'] not in ('POST_CUTOVER_VALIDATING','SOAKING'):
+        raise ValueError('Post-handoff rollback requires validation or soak state')
+    if not reason or len(reason)>160 or provider not in ('publicnode','validation'):
+        raise ValueError('Rollback reason or provider is invalid')
+    if value.get('rollback_intent'):
+        raise ValueError('Rollback intent already recorded')
+    value=dict(value,rollback_intent={'at':utc(),'reason':reason,'provider':provider,
+                                      'unresolved_ranges':unresolved_ranges})
+    with db.conn:save(db,value)
+    return value
+
+
+def record_operational_outcome(db, value, *, reason, rollback_pid, provider,
+                               reconciliation_proof):
+    """Append a later outcome without rewriting an old COMPLETE handoff."""
+    row=_row(db,'id=?',(value['id'],))
+    if not row or row['status'] not in ('COMPLETE','ROLLED_BACK'):
+        raise ValueError('Only a terminal handoff can receive an outcome')
+    if row['status']=='COMPLETE' and value.get('ready_tail_proof')!='verified':
+        raise ValueError('Completed handoff proof is missing')
+    if (not reason or len(reason)>160 or provider not in ('publicnode','validation') or
+        not str(rollback_pid).isdigit() or not reconciliation_proof):
+        raise ValueError('Operational rollback evidence is incomplete')
+    proof_digest=hashlib.sha256(row['payload'].encode()).hexdigest()
+    outcome={'session_id':value['id'],'handoff_completed':int(value.get('ready_tail_proof')=='verified'),
+             'later_operational_rollback':int(row['status']=='COMPLETE'),
+             'rollback_reason':reason,'rollback_pid':str(rollback_pid),
+             'rollback_route':'alchemy','provider_at_failure':provider,
+             'source_pid':value['source_legacy_pid'],'split_pid':value.get('split_pid'),
+             'proof_payload_sha256':proof_digest,
+             'reconciliation_proof':json.dumps(reconciliation_proof,sort_keys=True)}
+    existing=db.conn.execute('SELECT * FROM flow_cutover_outcomes WHERE session_id=?',
+                             (value['id'],)).fetchone()
+    if existing:
+        if any(existing[key]!=val for key,val in outcome.items()):
+            raise ValueError('Operational outcome already differs')
+        return dict(existing)
+    with db.conn:
+        db.conn.execute('''INSERT INTO flow_cutover_outcomes
+          (session_id,recorded_at_utc,handoff_completed,later_operational_rollback,
+           rollback_reason,rollback_pid,rollback_route,provider_at_failure,
+           source_pid,split_pid,proof_payload_sha256,reconciliation_proof)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',
+          (value['id'],utc(),*(outcome[key] for key in (
+             'handoff_completed','later_operational_rollback','rollback_reason',
+             'rollback_pid','rollback_route','provider_at_failure','source_pid',
+             'split_pid','proof_payload_sha256','reconciliation_proof'))))
+    return dict(db.conn.execute('SELECT * FROM flow_cutover_outcomes WHERE session_id=?',
+                                (value['id'],)).fetchone())
 
 
 def authorize_stop(db,value,proof):
@@ -331,13 +449,25 @@ def abort_empty(db):
     return advance(db,value,'ABORTED_PRE_STOP',failure='Empty test session aborted')
 
 
-def record_rollback(db, value, pid):
-    """Refine one failed session with the observed legacy rollback PID."""
+def record_rollback(db, value, pid, *, proof=None):
+    """Record the connected legacy PID after a failed or cancelled split run."""
     row=_row(db,'id=?',(value['id'],))
-    if not row or row['status'] not in PENDING|{'FAILED'}:
-        raise ValueError('No failed handoff to roll back')
+    if not row or row['status'] not in PENDING|{'FAILED','POST_CUTOVER_VALIDATING','SOAKING'}:
+        raise ValueError('No rollback-eligible session')
+    intent=value.get('rollback_intent')
+    if row['status'] in ('POST_CUTOVER_VALIDATING','SOAKING') and not intent:
+        raise ValueError('Post-handoff rollback intent is missing')
+    if row['status'] in ('POST_CUTOVER_VALIDATING','SOAKING') and not (
+        proof and proof.get('legacy_route_connected') is True and
+        proof.get('active_unresolved_gaps')==0 and proof.get('recovery_state')=='healthy'):
+        raise ValueError('Post-handoff rollback reconciliation is unproved')
+    reason=intent['reason'] if intent else value.get('failure','Handoff failed')
+    provider=intent['provider'] if intent else value.get('subscription_ready_provider','publicnode')
     value=dict(value,state='ROLLED_BACK',rollback_pid=str(pid),
-               rollback_state='legacy_active')
+               rollback_state='legacy_active',rollback_at=utc(),rollback_reason=reason,
+               provider_at_failure=provider,
+               unresolved_provider_switch_ranges=(intent or {}).get('unresolved_ranges',[]),
+               rollback_reconciliation_proof=proof)
     value['history']=[*value.get('history',[]),['ROLLED_BACK',time.time()]]
     with db.conn:
         db.conn.execute('''UPDATE flow_cutover_sessions SET status='ROLLED_BACK',
@@ -347,6 +477,9 @@ def record_rollback(db, value, pid):
             raise ValueError('Rollback session changed concurrently')
         db.conn.execute("INSERT INTO flow_state VALUES('cutover_state','rolled_back') "
                         "ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+    if proof:
+        record_operational_outcome(db,value,reason=reason,rollback_pid=pid,provider=provider,
+                                   reconciliation_proof=proof)
     return value
 
 

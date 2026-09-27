@@ -14,9 +14,10 @@ from eth_utils import keccak
 from eth_abi.exceptions import DecodingError
 
 from app.config import Config, ROOT
-from app.flow_cutover import (PENDING, advance as advance_cutover, gap_counts,
+from app.flow_cutover import (PENDING, advance as advance_cutover, begin_validation, gap_counts,
                               record_rollback, save as save_cutover,
                               session as cutover_session, unexpected_gap)
+from app import flow_provider_switch as provider_switch
 from app.flow_providers import FlowProviders, provider
 from app.flow_data import FlowDB, BUY, SELL, SWAP, HOOK, decode_event, stamp, iso, WINDOWS
 from app.rpc import Rpc, RpcError, LogRangeError, retry_delay
@@ -158,11 +159,13 @@ class FlowWorker:
         self.ws_provider='publicnode' if settings.split_enabled else 'alchemy'
         self.pending_recovery=set()
         self.recovery_heads={};self.blocked_recovery={};self.recovery_wait_until=0;self.connection_started_at=0
+        self.connection_id=None;self.subscription_ready_at=None;self.switch_retry_at=0
 
     def cutover_tick(self, targets):
         """Keep planned startup recovery behind the durable HTTP handoff."""
         value=cutover_session(self.db) if self.settings.split_enabled else None
-        if not value or value['state']=='NORMAL_CONNECTED':return False
+        if not value or value['state'] in ('POST_CUTOVER_VALIDATING','SOAKING','COMPLETE'):
+            return False
         if value['state']=='FAILED':
             self.db.set_state('service_status','cutover_failed')
             self.db.set_state('recovery_state','cutover_failed')
@@ -173,7 +176,7 @@ class FlowWorker:
                 advance_cutover(self.db,value,'FAILED',failure='Verified cursor missing')
                 self.db.set_state('service_status','cutover_failed')
                 return True
-            advance_cutover(self.db,value,'NORMAL_CONNECTED',ready_tail_proof='verified')
+            begin_validation(self.db,value)
             self.db.set_state('recovery_state','healthy')
             self.db.set_state('service_status','connected')
             return False
@@ -502,6 +505,14 @@ class FlowWorker:
                     self.blocked_recovery.pop(t['launch_id'],None)
                 recovery.append(t)
         if self.cutover_tick(targets):return
+        if self.settings.split_enabled:
+            session=cutover_session(self.db)
+            identity=session['id'] if session else None
+            if provider_switch.pending(self.db,identity) or provider_switch.blocked(self.db,identity):
+                self.db.set_state('service_status','provider_switch_pending' if
+                                  provider_switch.pending(self.db,identity) else 'provider_switch_failed')
+                self.db.set_state('recovery_state',self.db.state('service_status'))
+                return
         if recovery:
             recovery=[t for t in recovery if not self.accept_shadow_handoff(t)]
         if recovery and time.time()<self.recovery_wait_until:return
@@ -579,7 +590,10 @@ class FlowWorker:
     def finalize(self,connected):
         now=time.time()
         value=cutover_session(self.db) if self.settings.split_enabled else None
-        pending=bool(value and value['state'] in PENDING|{'FAILED'})
+        identity=value['id'] if value else None
+        switch_blocked=bool(self.settings.split_enabled and
+                            (provider_switch.pending(self.db,identity) or provider_switch.blocked(self.db,identity)))
+        pending=bool(value and value['state'] in PENDING|{'FAILED'}) or switch_blocked
         if not connected:
             with self.db.conn:self.db.conn.execute("UPDATE flow_tracking_targets SET status='partial',completed_at=?,updated_at=? WHERE tracking_end_at+10<? AND status NOT IN ('completed','partial')",(now,now,now))
         if connected and not pending:
@@ -607,6 +621,95 @@ class FlowWorker:
         with self.db.conn:self.db.conn.execute('INSERT OR REPLACE INTO flow_samples VALUES(?,?,?,?,?,?,?)',
             (int(now)//30*30,len({key[0] for key in self.subscriptions}) if connected else 0,len(self.subscriptions) if connected else 0,counts['curve'] if connected else 0,counts['v4'] if connected else 0,counts['hook'] if connected else 0,size))
         self.db.set_state('heartbeat',now)
+        provider_switch.connection_seen(self.db,self.connection_id,now)
+
+    def switch_filters(self):
+        snapshot=[]
+        for row in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')"):
+            t=dict(row);graduation=json.loads(t['graduation_json']) if t['graduation_json'] else None
+            for kind in self.filters(t):
+                base=graduation['block_number'] if graduation and kind!='curve' else t['launch_block']
+                snapshot.append({'launch_id':t['launch_id'],'kind':kind,'base':base,
+                                 'cursor':self.db.state(f'recovery:{t["launch_id"]}:{kind}')})
+        return snapshot
+
+    def subscriptions_acknowledged(self):
+        return all((t['launch_id'],kind) in self.subscriptions
+                   for t in self.db.conn.execute(
+                       "SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')")
+                   for kind in self.filters(dict(t)))
+
+    async def prove_provider_switch(self):
+        cutover=cutover_session(self.db)
+        identity=cutover['id'] if cutover else None
+        row=provider_switch.pending(self.db,identity)
+        if not row or time.time()<self.switch_retry_at:return
+        item=provider_switch.value(row)
+        if not self.subscriptions_acknowledged():return
+        if not item['new_connected_at'] or item['new_provider']!=self.ws_provider:
+            raise RpcError('Provider switch connection identity changed')
+        if not item['subscriptions_ready_at']:
+            item=provider_switch.acknowledged(self.db,row['id'])
+        if not item['filters']:
+            provider_switch.healthy(self.db,row['id'],{'calls':0,'recovered_events':0,
+                'duplicates':0,'unresolved_ranges':[],'zero_active_filters':True},[])
+            self.db.set_state('service_status','connected')
+            self.db.set_state('recovery_state','healthy')
+            return
+        # Reuse the durable, adaptive Validation HTTP proof and canonical event dedupe.
+        from app.flow_shadow import ShadowReconciler
+        original_rpc=self.rpc
+        runner=ShadowReconciler(self)
+        stage=f'provider_switch:{row["id"]}'
+        try:
+            if item['frozen_head'] is None:
+                head=int(await self.rpc.call('eth_blockNumber',[]),16)
+                first=min(max(f['base'],int(f['cursor'])-2) if f['cursor'] is not None
+                          else f['base'] for f in item['filters'])
+                if any(f['cursor'] is not None and int(f['cursor'])>head+2 for f in item['filters']):
+                    raise RpcError('Provider switch cursor exceeds Validation head')
+                item=provider_switch.frozen(self.db,row['id'],head,first)
+            runner.add_jobs(stage,item['uncertain_from'],item['frozen_head'],
+                            {f['launch_id'] for f in item['filters']})
+            if not await runner.run_stage(stage):
+                self.switch_retry_at=time.time()+30
+                return
+            summary=runner.summary(stage)
+            if summary['unresolved_ranges']:
+                self.switch_retry_at=time.time()+30
+                return
+            runner.promote(stage)
+            resolved=[]
+            with self.db.conn:
+                for gap_id in item['gap_ids']:
+                    gap=self.db.conn.execute('SELECT launch_id,resolved FROM flow_gaps WHERE id=?',
+                                             (gap_id,)).fetchone()
+                    if not gap:raise RpcError('Provider-switch gap disappeared')
+                    jobs=self.db.conn.execute('SELECT completion_status FROM flow_shadow_jobs '
+                        'WHERE stage=? AND launch_id=?',(stage,gap['launch_id'])).fetchall()
+                    if not jobs or any(job[0]!='complete' for job in jobs):
+                        raise RpcError('Provider-switch gap lacks full proof')
+                    self.db.conn.execute('UPDATE flow_gaps SET resolved=1 WHERE id=?',(gap_id,))
+                    resolved.append(gap_id)
+                for launch in {f['launch_id'] for f in item['filters']}:
+                    target=self.db.target(launch)
+                    if target and target['status'] not in ('completed','partial') and \
+                       all((launch,kind) in self.subscriptions for kind in self.filters(target)) and \
+                       not self.db.conn.execute('SELECT 1 FROM flow_gaps WHERE launch_id=? AND resolved=0',
+                                                (launch,)).fetchone():
+                        self.db.conn.execute('INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key) '
+                            'DO UPDATE SET value=excluded.value',
+                            (f'flow_shadow_handoff:{launch}',f'{item["frozen_head"]}:{int(time.time())}'))
+            provider_switch.healthy(self.db,row['id'],
+                {'calls':summary['actual_getlogs_calls'],'recovered_events':summary['recovered_events'],
+                 'duplicates':summary['duplicates'],'unresolved_ranges':[],
+                 'frozen_head':item['frozen_head'],'range_from':item['uncertain_from']},resolved)
+            healthy=gap_counts(self.db)[0]==0
+            self.db.set_state('service_status','connected' if healthy else 'bootstrap_required')
+            self.db.set_state('recovery_state','healthy' if healthy else 'bootstrap_required')
+        finally:
+            shadow_rpc=self.rpc;self.rpc=original_rpc
+            await shadow_rpc.close()
 
     async def run(self):
         cutover=cutover_session(self.db)
@@ -616,8 +719,6 @@ class FlowWorker:
             raise RpcError('Split start requires verified split configuration')
         if self.db.state('phase2b_coverage_start_at') is None:self.db.set_state('phase2b_coverage_start_at',time.time())
         self.db.set_state('service_status','starting')
-        if cutover and not self.settings.split_enabled and cutover['state'] in PENDING|{'FAILED'}:
-            record_rollback(self.db,cutover,os.getpid())
         pending=bool(self.settings.split_enabled and cutover and cutover['state'] in PENDING)
         if pending:advance_cutover(self.db,cutover,'SPLIT_WSS_CONNECTING',split_pid=str(os.getpid()))
         self.dirty.update(r[0] for r in self.db.conn.execute("SELECT launch_id FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')"))
@@ -647,6 +748,14 @@ class FlowWorker:
                         self.connection_started_at=time.time()
                         self.connected=True
                         current=cutover_session(self.db) if self.settings.split_enabled else None
+                        if self.settings.split_enabled:
+                            self.connection_id=provider_switch.connection_open(self.db,routed,self.connection_started_at,
+                                                                                current['id'] if current else None)
+                            switching=provider_switch.pending(self.db,current['id'] if current else None)
+                            if switching:
+                                provider_switch.connected(self.db,switching['id'],routed,
+                                                          self.connection_id,self.connection_started_at)
+                        self.subscription_ready_at=None
                         self.db.set_state('service_status','cutover_handoff_pending' if current and current['state'] in PENDING else 'connected')
                         self.db.set_state('connection_state','connected')
                         self.db.set_state('current_wss_provider',routed);started=time.time()
@@ -660,8 +769,28 @@ class FlowWorker:
                             try:await self.reconcile()
                             except FlowBudget as exc:
                                 self.defer_recovery(exc)
+                            if self.settings.split_enabled and self.subscriptions_acknowledged():
+                                if self.subscription_ready_at is None:
+                                    self.subscription_ready_at=time.time()
+                                try:await self.prove_provider_switch()
+                                except FlowBudget as exc:self.defer_recovery(exc)
+                                except (RpcError,ValueError) as exc:
+                                    switching=provider_switch.pending(self.db,current['id'] if current else None)
+                                    if switching:provider_switch.failed(self.db,switching['id'],type(exc).__name__)
+                                    self.db.set_state('service_status','provider_switch_failed')
+                                    self.db.set_state('recovery_state','provider_switch_failed')
                             self.drain()
                             if self.reader.done():await self.reader;raise RpcError('WS closed during recovery')
+                            if not self.settings.split_enabled and cutover and cutover['state'] in \
+                               PENDING|{'FAILED','POST_CUTOVER_VALIDATING','SOAKING'}:
+                                active_gaps=gap_counts(self.db)[0]
+                                if (self.db.state('service_status')=='connected' and
+                                    self.db.state('recovery_state')=='healthy' and
+                                    not self.pending_recovery and not active_gaps):
+                                    proof={'legacy_route_connected':True,'active_unresolved_gaps':0,
+                                           'recovery_state':'healthy','verified_at':time.time()}
+                                    record_rollback(self.db,cutover,os.getpid(),proof=proof)
+                                    cutover=None
                             self.finalize(True)
                             if time.time()-started>60:failures=0
                             await asyncio.sleep(2)
@@ -674,13 +803,33 @@ class FlowWorker:
                     self.db.count('flow_provider_connection_errors_'+self.ws_provider)
                     log.warning('Flow disconnected provider=%s error=%s attempts=%d',self.ws_provider,type(exc).__name__,failures)
                     now=time.time()
-                    for t in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')"):
-                        self.db.gap(t['launch_id'],t['coverage_end_at'] or t['tracking_start_at'],min(now,t['tracking_end_at']),
-                                    'provider_budget' if isinstance(exc,FlowBudget) else 'ws_gap',int(self.db.state('last_connected_block',0)))
-                        self.dirty.add(t['launch_id'])
+                    provider_switch.connection_close(self.db,self.connection_id,now);self.connection_id=None
+                    identity=current['id'] if current else None
+                    switching=provider_switch.pending(self.db,identity) if self.settings.split_enabled else None
+                    if switching and provider_switch.value(switching)['new_connected_at']:
+                        provider_switch.failed(self.db,switching['id'],'connection_lost_before_switch_proof')
+                        switching=None
+                    gap_ids=[]
+                    if not switching:
+                        for t in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')"):
+                            self.db.gap(t['launch_id'],t['coverage_end_at'] or t['tracking_start_at'],min(now,t['tracking_end_at']),
+                                        'provider_budget' if isinstance(exc,FlowBudget) else 'ws_gap',
+                                        int(self.db.state('last_connected_block',0)))
+                            gap_ids.append(self.db.conn.execute('SELECT last_insert_rowid()').fetchone()[0])
+                            self.dirty.add(t['launch_id'])
+                        if (self.settings.split_enabled and current and current['state'] not in PENDING|{'FAILED'}
+                            and not provider_switch.blocked(self.db,identity)):
+                            switch_id,_=provider_switch.start(self.db,self.ws_provider,self.switch_filters(),gap_ids,
+                                session_id=identity,ready_at=self.subscription_ready_at,
+                                last_block=self.db.state('last_connected_block'),now=now)
+                    else:
+                        switch_id=switching['id']
                     self.db.set_state('service_status','disconnected');self.finalize(False)
                     self.db.set_state('connection_state','disconnected')
                     if self.ws_provider=='publicnode' and failures>=2:
+                        if (self.settings.split_enabled and current and current['state'] not in PENDING|{'FAILED'}
+                            and not provider_switch.blocked(self.db,identity)):
+                            provider_switch.failover_pending(self.db,switch_id,type(exc).__name__)
                         self.ws_provider='validation';self.db.count('flow_provider_failovers')
                         failures=1
                         log.warning('Flow failover to Validation WSS; HTTP gap recovery required')
@@ -692,6 +841,7 @@ class FlowWorker:
                     # Buffered events are persisted before losing subscription routes.
                     self.drain()
                     self.subscriptions={};self.routes={}
+                    self.subscription_ready_at=None
         finally:
             await self.rpc.close();self.main.close();self.db.set_state('service_status','stopped')
 
