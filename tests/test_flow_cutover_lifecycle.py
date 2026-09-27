@@ -274,6 +274,8 @@ class SessionLifecycleTests(unittest.TestCase):
             self.assertEqual(rolled['provider_at_failure'],'validation')
             self.assertEqual(status(self.db)['historical_latest_terminal']['operational_outcome']
                              ['rollback_reason'],'provider_switch_unproved')
+            self.assertTrue(status(self.db)['historical_latest_terminal']['operational_outcome']
+                            ['later_operational_rollback'])
 
     def test_completed_legacy_handoff_accepts_append_only_later_outcome(self):
         self.archive();fresh=self.fresh()

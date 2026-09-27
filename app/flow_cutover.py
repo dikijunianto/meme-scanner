@@ -343,8 +343,9 @@ def record_operational_outcome(db, value, *, reason, rollback_pid, provider,
         not str(rollback_pid).isdigit() or not reconciliation_proof):
         raise ValueError('Operational rollback evidence is incomplete')
     proof_digest=hashlib.sha256(row['payload'].encode()).hexdigest()
-    outcome={'session_id':value['id'],'handoff_completed':int(value.get('ready_tail_proof')=='verified'),
-             'later_operational_rollback':int(row['status']=='COMPLETE'),
+    handoff_completed=int(value.get('ready_tail_proof')=='verified')
+    outcome={'session_id':value['id'],'handoff_completed':handoff_completed,
+             'later_operational_rollback':handoff_completed,
              'rollback_reason':reason,'rollback_pid':str(rollback_pid),
              'rollback_route':'alchemy','provider_at_failure':provider,
              'source_pid':value['source_legacy_pid'],'split_pid':value.get('split_pid'),
