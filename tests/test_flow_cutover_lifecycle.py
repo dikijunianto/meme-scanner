@@ -8,8 +8,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from app.flow_cutover import (abort_empty, advance, create, current, import_rolled_back_legacy,
-                              legacy_digest, new, require_phase_pid, save, schema, status)
+from app.flow_cutover import (abort_empty,abort_pre_stop,advance,authorize_stop,create,current,
+                              import_rolled_back_legacy,legacy_digest,mark_source_stopped,
+                              mark_split_configured,mark_stop_issued,new,require_phase_pid,
+                              save,schema,status)
 from app.flow_data import FlowDB
 
 
@@ -134,6 +136,7 @@ class SessionLifecycleTests(unittest.TestCase):
         for stage in ('historical','stop_tail'):
             with self.db.conn:self.db.conn.execute('INSERT INTO flow_shadow_jobs VALUES(?,?,?,?)',
                 (f'cutover:{fresh["id"]}:{stage}',1,'curve','complete'))
+        advance(self.db,fresh,'SOURCE_STOPPED',source_stopped_at='2026-09-27T00:00:00Z')
         self.assertEqual(new(self.db,10,14,[])['state'],'STOP_TAIL_VERIFIED')
         self.assertEqual(legacy_digest(self.db)[1],2)
 
@@ -168,6 +171,66 @@ class SessionLifecycleTests(unittest.TestCase):
         self.assertEqual(created['gate'],'CUTOVER_SESSION_CREATED')
         self.assertEqual(created['H_prefetch'],None)
         self.assertEqual(current(self.db)['source_legacy_pid'],'1963150')
+
+    def test_shadowed_and_authorized_abort_keep_proof_and_allow_fresh_attempt(self):
+        self.archive();fresh=self.fresh()
+        stage=f'cutover:{fresh["id"]}:historical'
+        with self.db.conn:
+            self.db.conn.execute('INSERT INTO flow_shadow_jobs VALUES(?,?,?,?)',
+                                 (stage,1,'curve','complete'))
+            self.db.conn.execute('INSERT INTO flow_shadow_ranges VALUES(?,?,?,?,?,?)',
+                                 (stage,1,'curve',1,10,1))
+        shadow=advance(self.db,fresh,'SHADOW_VERIFIED',H_prefetch=10,targets=[{'launch_id':1}],
+                       shadow_proof='verified')
+        aborted=abort_pre_stop(self.db,shadow,'target_expired',source_pid='1963150',
+                               source_start='100',route='alchemy',split=False)
+        self.assertEqual(aborted['state'],'ABORTED_PRE_STOP')
+        self.assertEqual(aborted['H_prefetch'],10)
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_shadow_ranges WHERE stage=?',
+                                             (stage,)).fetchone()[0],1)
+        with self.assertRaises(ValueError):advance(self.db,aborted,'SHADOW_VERIFIED')
+        second=self.fresh()
+        self.assertNotEqual(second['id'],fresh['id'])
+        self.assertIsNone(second['H_prefetch'])
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_shadow_jobs WHERE stage LIKE ?',
+                         (f'cutover:{second["id"]}:%',)).fetchone()[0],0)
+        second=advance(self.db,second,'SHADOW_VERIFIED',H_prefetch=20,shadow_proof='verified')
+        authorized=authorize_stop(self.db,second,{'H_pre_stop':22,
+            'candidate_config_fingerprint':'candidate'})
+        aborted2=abort_pre_stop(self.db,authorized,'operator_cancelled',source_pid='1963150',
+                                source_start='100',route='alchemy',split=False)
+        self.assertEqual(aborted2['state'],'ABORTED_PRE_STOP')
+        self.assertIsNone(current(self.db))
+
+    def test_stop_intent_and_split_match_are_durable(self):
+        self.archive();fresh=self.fresh()
+        fresh=advance(self.db,fresh,'SHADOW_VERIFIED',H_prefetch=10,shadow_proof='verified')
+        authorized=authorize_stop(self.db,fresh,{'H_pre_stop':12,
+            'candidate_config_fingerprint':'candidate'})
+        self.assertIsNone(authorized.get('source_stopped_at'))
+        with self.assertRaises(ValueError):mark_source_stopped(self.db,authorized)
+        issued=mark_stop_issued(self.db,authorized)
+        self.assertIsNotNone(status(self.db)['current_active']['stop_command_issued_at'])
+        stopped=mark_source_stopped(self.db,issued)
+        self.assertEqual(stopped['state'],'SOURCE_STOPPED')
+        with self.assertRaises(ValueError):abort_pre_stop(self.db,stopped,'too_late',
+            source_pid='1963150',source_start='100',route='alchemy',split=False)
+        for stage in ('historical','stop_tail'):
+            with self.db.conn:self.db.conn.execute('INSERT INTO flow_shadow_jobs VALUES(?,?,?,?)',
+                (f'cutover:{fresh["id"]}:{stage}',1,'curve','complete'))
+        tail=new(self.db,10,14,[])
+        with self.assertRaises(ValueError):mark_split_configured(self.db,tail,'different')
+        configured=mark_split_configured(self.db,tail,'candidate')
+        self.assertEqual(configured['state'],'SPLIT_CONFIGURED')
+
+    def test_abort_requires_original_live_legacy_process(self):
+        self.archive();fresh=self.fresh()
+        for kwargs in ({'source_pid':'different','source_start':'100','route':'alchemy','split':False},
+                       {'source_pid':'1963150','source_start':'changed','route':'alchemy','split':False},
+                       {'source_pid':'1963150','source_start':'100','route':'publicnode','split':False},
+                       {'source_pid':'1963150','source_start':'100','route':'alchemy','split':True}):
+            with self.assertRaises(ValueError):abort_pre_stop(self.db,fresh,'invalid',**kwargs)
+        self.assertEqual(current(self.db)['id'],fresh['id'])
 
 
 if __name__=='__main__':unittest.main()

@@ -8,7 +8,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.flow_config import atomic_split_update, no_network_probe, prestart_check, service_identity
+from app.flow_config import (atomic_split_update,candidate_split_status,
+                             no_network_probe,prestart_check,safe_split_fingerprint,service_identity)
 from app.flow_providers import FlowProviders
 from app.flow_worker import FlowSettings
 
@@ -52,6 +53,19 @@ class FlowConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(b'FLOW_PROVIDER_SPLIT_ENABLED=true', self.path.read_bytes())
         self.assertNotIn(self.secret.decode().strip(), str(result))
         self.assertEqual(len(list(self.parent.iterdir())), 1)
+
+    def test_candidate_render_is_offline_and_matches_verified_mutation(self):
+        providers=FlowProviders('https://mainnet.robinhood.validationcloud.io/v1/test',
+                                'wss://mainnet.robinhood.validationcloud.io/v1/test')
+        before=self.path.read_bytes()
+        with patch('app.flow_config.FlowProviders.load',return_value=providers):
+            candidate=candidate_split_status(root=self.root)
+            self.assertEqual(self.path.read_bytes(),before)
+            self.assertNotEqual(candidate['candidate_fingerprint'],candidate['actual_fingerprint'])
+            atomic_split_update(True,root=self.root,identity=self.identity,readable=self.readable)
+            settings=FlowSettings.from_values({'FLOW_PROVIDER_SPLIT_ENABLED':'true'})
+            self.assertEqual(candidate['candidate_fingerprint'],
+                             safe_split_fingerprint(settings,providers))
 
     def test_unreadable_and_failed_replace_leave_previous_config(self):
         before = self.path.read_bytes()
@@ -131,19 +145,81 @@ class FlowConfigTests(unittest.IsolatedAsyncioTestCase):
         runner.worker.rpc.close = AsyncMock()
         old_rpc = MagicMock()
         old_rpc.close = AsyncMock()
-        cutover={'id':'fresh','state':'SHADOW_VERIFIED','revision':'checked',
-                 'main_pid':'1','source_legacy_pid':'2','targets':[]}
+        cutover={'id':'fresh','state':'STOP_AUTHORIZED','revision':'checked',
+                 'main_pid':'1','source_legacy_pid':'2','H_pre_stop':3,'targets':[]}
         with patch.object(script, 'verified_checkout', return_value='checked'), \
              patch.object(script, 'service', side_effect=[{'ActiveState': 'active', 'MainPID': '1'},
                                                          {'ActiveState': 'active', 'MainPID': '2'}]), \
-             patch.object(script.FlowSettings, 'load', return_value=FlowSettings(split_enabled=True)), \
+             patch.object(script.FlowSettings, 'load', return_value=FlowSettings(split_enabled=False)), \
              patch.object(script, 'FlowDB'), patch.object(script.Config, 'load'), \
              patch.object(script.FlowProviders, 'load'), \
              patch.object(script, 'active_cutover', return_value={'id':'fresh','payload':json.dumps(cutover)}), \
-             patch.object(script, 'filter_snapshot', return_value=[]), \
+             patch.object(script, 'authorization_reasons', return_value=[]), \
              patch.object(script, 'make_reconciler', return_value=(runner, old_rpc)), \
-             patch.object(script, 'prestart_check', new_callable=AsyncMock, side_effect=ValueError('unreadable')), \
+             patch.object(script, 'candidate_split_preflight', new_callable=AsyncMock,
+                          side_effect=ValueError('unreadable')), \
              patch.object(script.subprocess, 'run') as stop:
             with self.assertRaises(ValueError):
                 await script.operate('stop-flow')
             stop.assert_not_called()
+
+    async def test_split_mutation_requires_stopped_session_and_matching_candidate(self):
+        import importlib,sys
+        with patch.dict(sys.modules,{'_bootstrap':types.ModuleType('_bootstrap')}):
+            script=importlib.import_module('scripts.flow_config_status')
+        flags={'split':False}
+        args=SimpleNamespace(self_check=False,preflight=False,candidate_preflight=False,
+                             enable_split=True,disable_split=False,require_split=False)
+        value={'id':'fresh','state':'STOP_TAIL_VERIFIED','source_legacy_pid':'old',
+               'source_stopped_at':'now','candidate_config_fingerprint':'candidate',
+               'authorization':{'legacy_file_digest':'legacy'}}
+        db=MagicMock()
+        def settings():return FlowSettings(split_enabled=flags['split'])
+        def mutate(enabled,**kwargs):flags['split']=enabled
+        with (patch.object(script,'service_identity',return_value=self.identity),
+              patch.object(script.FlowSettings,'load',side_effect=settings),
+              patch.object(script,'FlowDB',return_value=db),
+              patch.object(script,'active_cutover',return_value={'payload':json.dumps(value)}),
+              patch.object(script.subprocess,'check_output',return_value='ActiveState=inactive\nMainPID=0\n'),
+              patch.object(script,'candidate_split_status',return_value={
+                  'candidate_fingerprint':'candidate','legacy_file_digest':'legacy'}),
+              patch.object(script,'prestart_check',AsyncMock(return_value={'no_network':True})),
+              patch.object(script,'atomic_split_update',side_effect=mutate) as atomic,
+              patch.object(script,'safe_split_fingerprint',return_value='candidate'),
+              patch.object(script,'metadata',return_value={
+                  'mode':'0600','parent_mode':'0700','readable_by_service_user':True}),
+              patch.object(script.FlowProviders,'load',return_value=MagicMock()),
+              patch.object(script,'mark_split_configured') as mark):
+            await script.operate(args)
+            self.assertTrue(flags['split'])
+            atomic.assert_called_once()
+            mark.assert_called_once()
+        flags['split']=False
+        checks=0
+        async def failed_postcheck(**kwargs):
+            nonlocal checks
+            checks+=1
+            if checks==2:raise ValueError('candidate failed after mutation')
+            return {'no_network':True}
+        with (patch.object(script,'service_identity',return_value=self.identity),
+              patch.object(script.FlowSettings,'load',side_effect=settings),
+              patch.object(script,'FlowDB',return_value=db),
+              patch.object(script,'active_cutover',return_value={'payload':json.dumps(value)}),
+              patch.object(script.subprocess,'check_output',return_value='ActiveState=inactive\nMainPID=0\n'),
+              patch.object(script,'source_process_gone',return_value=True),
+              patch.object(script,'candidate_split_status',return_value={
+                  'candidate_fingerprint':'candidate','legacy_file_digest':'legacy'}),
+              patch.object(script,'prestart_check',side_effect=failed_postcheck),
+              patch.object(script,'atomic_split_update',side_effect=mutate) as atomic,
+              patch.object(script,'mark_split_configured') as mark):
+            with self.assertRaises(ValueError):await script.operate(args)
+            self.assertFalse(flags['split'])
+            self.assertEqual([c.args[0] for c in atomic.call_args_list],[True,False])
+            mark.assert_not_called()
+        with (patch.object(script,'service_identity',return_value=self.identity),
+              patch.object(script.FlowSettings,'load',side_effect=settings),
+              patch.object(script,'FlowDB',return_value=db),
+              patch.object(script,'active_cutover',return_value=None),
+              patch.object(script,'atomic_split_update') as atomic):
+            with self.assertRaises(ValueError):await script.operate(args)
+            atomic.assert_not_called()

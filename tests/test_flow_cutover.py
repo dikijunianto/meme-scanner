@@ -1,5 +1,6 @@
 """The planned handoff is durable; ordinary recovery still owns every other gap."""
 import asyncio
+from contextlib import ExitStack
 import copy
 import json
 from dataclasses import replace
@@ -11,6 +12,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from app.config import Config
+from app.flow_config import safe_split_fingerprint
 from app.flow_cutover import advance, create, gap_counts, new, save, schema, session
 from app.flow_data import FlowDB
 from app.flow_providers import FlowProviders
@@ -54,6 +56,60 @@ class CutoverTests(unittest.IsolatedAsyncioTestCase):
         p=patch.object(Rpc,'_send',answer);p.start();self.addCleanup(p.stop);self.patch=p
         return calls
 
+    async def shadowed_pre_stop(self):
+        sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
+        from scripts import phase2b2_shadow as script
+        self.rpc(self.base+8)
+        schema(self.db)
+        with self.db.conn:self.db.conn.execute('''INSERT INTO flow_cutover_sessions
+          (id,created_at_utc,deploy_git_revision,source_route,source_legacy_pid,status,payload)
+          VALUES('old','2026-09-01T00:00:00Z','old-revision','alchemy','old-pid','ROLLED_BACK',?)''',
+          (json.dumps({'id':'old','state':'ROLLED_BACK','revision':'old-revision'}),))
+        created=create(self.db,revision='test',source_pid='old',source_start='100',
+                       main_pid='main',roles_fingerprint='roles')
+        self.runner.session_id=created['id']
+        self.db.set_state('recovery:1:curve',self.base+5)
+        for key,value in (('git_revision','test'),('main_pid','main'),('old_flow_pid','old'),
+                          ('provider_chain_ids_verified','{}'),('H_prefetch',self.base+5)):
+            self.runner.set_meta(key,value)
+        self.runner.add_jobs('historical',0,self.base+5)
+        self.assertTrue(await self.runner.run_stage('historical'))
+        self.db.set_state('current_wss_provider','alchemy')
+        self.db.set_state('service_status','connected')
+        self.db.set_state('connection_state','connected')
+        self.db.set_state('recovery_state','healthy')
+        snapshot=script.filter_snapshot(self.db)
+        advance(self.db,created,'SHADOW_VERIFIED',H_prefetch=self.base+5,
+                targets=snapshot,shadow_proof='verified')
+        return script
+
+    def operator_patches(self,script,state):
+        stack=ExitStack()
+        settings=replace(self.settings,split_enabled=False)
+        candidate={'candidate_fingerprint':'candidate',
+                   'actual_fingerprint':safe_split_fingerprint(settings,self.providers),
+                   'legacy_file_digest':'legacy-digest','readable_by_service_user':True,
+                   'owner_uid':1000,'owner_gid':1000,'mode':'0600','parent_mode':'0700'}
+        def service(name):
+            if name=='meme-scanner.service':return {'ActiveState':'active','MainPID':'main',
+                                                     'ExecMainStartTimestampMonotonic':'1'}
+            return {'ActiveState':'active' if state['active'] else 'inactive',
+                    'MainPID':'old' if state['active'] else '0',
+                    'ExecMainStartTimestampMonotonic':'100' if state['active'] else '0'}
+        for target,name,value in ((script,'verified_checkout','test'),
+                                  (script.FlowSettings,'load',settings),
+                                  (script.Config,'load',self.config),
+                                  (script.FlowProviders,'load',self.providers)):
+            stack.enter_context(patch.object(target,name,return_value=value))
+        stack.enter_context(patch.object(script,'service',side_effect=service))
+        stack.enter_context(patch.object(script,'FlowDB',side_effect=lambda _:FlowDB(self.path/'flow.db')))
+        stack.enter_context(patch.object(script,'candidate_split_preflight',
+                                         AsyncMock(return_value=candidate)))
+        stack.enter_context(patch.object(script,'candidate_split_status',return_value=candidate))
+        stack.enter_context(patch.object(script,'prestart_check',
+                                         AsyncMock(return_value={'no_network':True})))
+        return stack
+
     async def prepared(self,head=None,logs=()):
         head=head or self.base+184
         calls=self.rpc(head,logs)
@@ -74,8 +130,10 @@ class CutoverTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.runner.run_stage('stop_tail'))
         self.runner.promote('historical');self.runner.promote('stop_tail')
         self.db.set_state('recovery:1:curve',self.base+8)
+        advance(self.db,session(self.db),'SOURCE_STOPPED',source_stopped_at='2026-09-27T00:00:00Z')
         value=new(self.db,self.base+5,self.base+8,[{'launch_id':1,'kind':'curve',
             'base':self.base,'query':self.worker.filters(self.t)['curve']}])
+        advance(self.db,value,'SPLIT_CONFIGURED')
         self.runner.set_meta('cutover_session_id',value['id'])
         self.worker.command=AsyncMock(return_value='sub')
         self.worker.discover=AsyncMock()
@@ -264,6 +322,73 @@ class CutoverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runner.resolve_failed_cutover_gaps([gap_id],self.base+12,now),[gap_id])
         self.assertEqual(self.runner.resolve_failed_cutover_gaps([gap_id],self.base+12,now),[])
         self.assertEqual(self.db.conn.execute('SELECT resolved FROM flow_gaps WHERE id=?',(gap_id,)).fetchone()[0],1)
+
+    async def test_stop_authorization_accepts_legacy_split_false_then_records_source_stop(self):
+        script=await self.shadowed_pre_stop();state={'active':True}
+        with self.operator_patches(script,state):
+            authorized=await script.operate('authorize-stop')
+            self.assertEqual(authorized['gate'],'STOP_AUTHORIZED')
+            self.assertTrue(state['active'])
+            self.assertEqual(session(self.db)['state'],'STOP_AUTHORIZED')
+            self.assertIsNone(session(self.db).get('source_stopped_at'))
+            def stop(*args,**kwargs):
+                state['active']=False
+                return None
+            with patch.object(script.subprocess,'run',side_effect=stop) as command:
+                stopped=await script.operate('stop-flow')
+                command.assert_called_once()
+            self.assertEqual(stopped['gate'],'SOURCE_STOPPED')
+            self.assertEqual(session(self.db)['source_legacy_pid'],'old')
+            self.assertIsNotNone(session(self.db)['source_stopped_at'])
+
+    async def test_target_expiry_refuses_stop_and_shadowed_authorization_aborts(self):
+        script=await self.shadowed_pre_stop();state={'active':True}
+        with self.operator_patches(script,state):
+            self.assertEqual((await script.operate('authorize-stop'))['gate'],'STOP_AUTHORIZED')
+            with self.db.conn:self.db.conn.execute("UPDATE flow_tracking_targets SET status='partial' WHERE launch_id=1")
+            with patch.object(script.subprocess,'run') as stop:
+                with self.assertRaises(RpcError):await script.operate('stop-flow')
+                stop.assert_not_called()
+            aborted=await script.operate('abort-session','target_expired')
+            self.assertEqual(aborted['gate'],'PRE_STOP_SESSION_ABORTED')
+            self.assertEqual(session(self.db)['state'],'ABORTED_PRE_STOP')
+            self.assertGreater(self.db.conn.execute('SELECT count(*) FROM flow_shadow_ranges WHERE stage LIKE ?',
+                (f'cutover:{aborted["id"]}:%',)).fetchone()[0],0)
+            fresh=await script.operate('new-session')
+            self.assertNotEqual(fresh['id'],aborted['id'])
+            self.assertIsNone(fresh['H_prefetch'])
+
+    async def test_stop_failure_and_crash_recovery_preserve_exact_source(self):
+        script=await self.shadowed_pre_stop();state={'active':True}
+        with self.operator_patches(script,state):
+            await script.operate('authorize-stop')
+            with patch.object(script.subprocess,'run',side_effect=OSError('stop failed')):
+                with self.assertRaises(OSError):await script.operate('stop-flow')
+            self.assertEqual(session(self.db)['state'],'STOP_AUTHORIZED')
+            self.assertTrue(state['active'])
+            self.assertIsNotNone(session(self.db)['stop_command_issued_at'])
+            state['active']=False
+            with patch.object(script,'source_process_gone',return_value=False), \
+                 patch.object(script.subprocess,'run') as stop:
+                with self.assertRaises(RpcError):await script.operate('stop-flow')
+                stop.assert_not_called()
+            with patch.object(script,'source_process_gone',return_value=True), \
+                 patch.object(script.subprocess,'run') as stop:
+                recovered=await script.operate('stop-flow')
+                stop.assert_not_called()
+            self.assertTrue(recovered['recovered_after_crash'])
+            self.assertEqual(session(self.db)['state'],'SOURCE_STOPPED')
+
+    async def test_split_true_refuses_pre_stop_without_service_change(self):
+        script=await self.shadowed_pre_stop();state={'active':True}
+        with self.operator_patches(script,state):
+            await script.operate('authorize-stop')
+            with patch.object(script.FlowSettings,'load',return_value=replace(self.settings,split_enabled=True)), \
+                 patch.object(script.subprocess,'run') as stop:
+                with self.assertRaises(RpcError):await script.operate('stop-flow')
+                stop.assert_not_called()
+            self.assertEqual(session(self.db)['state'],'STOP_AUTHORIZED')
+            self.assertTrue(state['active'])
 
 
 if __name__=='__main__':unittest.main()

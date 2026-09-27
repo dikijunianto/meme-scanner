@@ -1,16 +1,24 @@
 """Durable, explicit Phase 2B.2 cutover sessions."""
 import hashlib
 import json
+from pathlib import Path
 import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
 KEY = 'phase2b2_cutover_session'  # Old singleton; never rewritten.
-PENDING = {'STOP_TAIL_VERIFIED', 'SPLIT_WSS_CONNECTING', 'SUBSCRIPTIONS_READY',
+PENDING = {'SOURCE_STOPPED', 'STOP_TAIL_VERIFIED', 'SPLIT_CONFIGURED',
+           'SPLIT_WSS_CONNECTING', 'SUBSCRIPTIONS_READY',
            'READY_TAIL_PENDING'}
-ACTIVE = {'CREATED', 'SHADOW_IN_PROGRESS', 'SHADOW_VERIFIED', *PENDING,
+PRE_STOP = {'CREATED','SHADOW_IN_PROGRESS','SHADOW_VERIFIED','STOP_AUTHORIZED'}
+ACTIVE = {*PRE_STOP, *PENDING,
           'READY_TAIL_VERIFIED'}
 TERMINAL = {'COMPLETE', 'FAILED', 'ROLLED_BACK', 'ABORTED_PRE_STOP', 'ARCHIVED'}
+
+
+def source_process_gone(pid):
+    """An inactive unit is insufficient if the bound process survived elsewhere."""
+    return not (Path('/proc') / str(pid)).exists()
 
 
 def utc(at=None):
@@ -29,6 +37,12 @@ def schema(db):
         db.conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS one_active_flow_cutover
         ON flow_cutover_sessions((1)) WHERE status IN
         ('CREATED','SHADOW_IN_PROGRESS','SHADOW_VERIFIED','STOP_TAIL_VERIFIED',
+         'SPLIT_WSS_CONNECTING','SUBSCRIPTIONS_READY','READY_TAIL_PENDING',
+         'READY_TAIL_VERIFIED')''')
+        db.conn.execute('''CREATE UNIQUE INDEX IF NOT EXISTS one_active_flow_cutover_v2
+        ON flow_cutover_sessions((1)) WHERE status IN
+        ('CREATED','SHADOW_IN_PROGRESS','SHADOW_VERIFIED','STOP_AUTHORIZED',
+         'SOURCE_STOPPED','STOP_TAIL_VERIFIED','SPLIT_CONFIGURED',
          'SPLIT_WSS_CONNECTING','SUBSCRIPTIONS_READY','READY_TAIL_PENDING',
          'READY_TAIL_VERIFIED')''')
         db.conn.execute('''CREATE TABLE IF NOT EXISTS flow_cutover_legacy_proof(
@@ -51,7 +65,8 @@ def _row(db, where, args=()):
 
 def current(db):
     return _row(db, "status IN ('CREATED','SHADOW_IN_PROGRESS','SHADOW_VERIFIED',"
-                "'STOP_TAIL_VERIFIED','SPLIT_WSS_CONNECTING','SUBSCRIPTIONS_READY',"
+                "'STOP_AUTHORIZED','SOURCE_STOPPED','STOP_TAIL_VERIFIED',"
+                "'SPLIT_CONFIGURED','SPLIT_WSS_CONNECTING','SUBSCRIPTIONS_READY',"
                 "'READY_TAIL_PENDING','READY_TAIL_VERIFIED')")
 
 
@@ -84,7 +99,12 @@ def status(db):
             'rollback_state':value.get('rollback_state'),
             'legacy_proof_digest':value.get('legacy_proof_digest'),
             'legacy_jobs':value.get('legacy_jobs'),
-            'legacy_ranges':value.get('legacy_ranges')}
+            'legacy_ranges':value.get('legacy_ranges'),
+            'stop_authorized_at':value.get('stop_authorized_at'),
+            'stop_command_issued_at':value.get('stop_command_issued_at'),
+            'source_stopped_at':value.get('source_stopped_at'),
+            'candidate_config_fingerprint':value.get('candidate_config_fingerprint'),
+            'authorization':value.get('authorization')}
     history=[view(dict(row)) for row in db.conn.execute(
         "SELECT * FROM flow_cutover_sessions WHERE status IN "
         "('COMPLETE','FAILED','ROLLED_BACK','ABORTED_PRE_STOP','ARCHIVED') ORDER BY rowid DESC"
@@ -190,7 +210,7 @@ def create(db, *, revision, source_pid, source_start, main_pid, roles_fingerprin
 
 def require_phase_pid(value, mode, pid, start=None):
     """Bind the legacy process before stop, then the new process separately."""
-    if mode in ('prefetch','preflight','stop-flow'):
+    if mode in ('prefetch','preflight','authorize-stop','stop-flow'):
         if (value['source_legacy_pid']!=str(pid) or
             (start is not None and value.get('source_legacy_start_time') not in (None,start))):
             raise ValueError('Legacy source process changed before stop')
@@ -232,17 +252,57 @@ def advance(db, value, state, **fields):
     return value
 
 
+def authorize_stop(db,value,proof):
+    if value['state']!='SHADOW_VERIFIED' or value['H_prefetch'] is None:
+        raise ValueError('Fresh shadow proof is required before stop authorization')
+    if proof['H_pre_stop']<value['H_prefetch'] or not proof['candidate_config_fingerprint']:
+        raise ValueError('Stop authorization is incomplete')
+    return advance(db,value,'STOP_AUTHORIZED',H_pre_stop=proof['H_pre_stop'],
+                   stop_authorized_at=utc(),candidate_config_fingerprint=proof['candidate_config_fingerprint'],
+                   authorization=proof)
+
+
+def mark_stop_issued(db,value):
+    if value['state']!='STOP_AUTHORIZED' or value.get('stop_command_issued_at'):
+        raise ValueError('Stop command was already issued or unauthorized')
+    value=dict(value,stop_command_issued_at=utc())
+    with db.conn:save(db,value)
+    return value
+
+
+def mark_source_stopped(db,value):
+    if value['state']!='STOP_AUTHORIZED' or not value.get('stop_command_issued_at'):
+        raise ValueError('Source stop has no durable command intent')
+    return advance(db,value,'SOURCE_STOPPED',source_stopped_at=utc())
+
+
+def mark_split_configured(db,value,fingerprint):
+    if value['state']!='STOP_TAIL_VERIFIED' or fingerprint!=value.get('candidate_config_fingerprint'):
+        raise ValueError('Split config does not match authorized candidate')
+    return advance(db,value,'SPLIT_CONFIGURED',split_configured_at=utc())
+
+
+def abort_pre_stop(db,value,reason,*,source_pid,source_start,route,split):
+    if (value['state'] not in PRE_STOP or value.get('source_stopped_at') or
+        value.get('split_pid') or split or route!='alchemy'):
+        raise ValueError('Source stop or split prevents pre-stop abort')
+    require_phase_pid(value,'stop-flow',source_pid,source_start)
+    if not reason or len(reason)>160:raise ValueError('Explicit short abort reason required')
+    return advance(db,value,'ABORTED_PRE_STOP',failure=reason,abort_reason=reason)
+
+
 def new(db, h_prefetch, h_stop, targets):
     """Promote an already explicit, freshly shadowed session."""
     row=current(db)
     value=json.loads(row['payload']) if row else None
-    if not value or value['state'] not in ('SHADOW_VERIFIED','STOP_TAIL_VERIFIED'):
-        raise ValueError('Fresh shadow session is not verified')
+    if not value or value['state'] not in ('SOURCE_STOPPED','STOP_TAIL_VERIFIED'):
+        raise ValueError('Durable source stop is required')
     if value['state']=='STOP_TAIL_VERIFIED':
         if (value['H_prefetch'],value['H_stop'],value['targets'])==(h_prefetch,h_stop,targets):
             return value
         raise ValueError('Stop-tail identity changed')
-    if value['H_prefetch']!=h_prefetch or value['shadow_proof']!='verified':
+    if (value['H_prefetch']!=h_prefetch or value['shadow_proof']!='verified' or
+        not value.get('source_stopped_at')):
         raise ValueError('Shadow head is not bound to this session')
     for stage in ('historical','stop_tail'):
         scoped=f'cutover:{value["id"]}:{stage}'

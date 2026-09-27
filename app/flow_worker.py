@@ -43,6 +43,10 @@ class FlowSettings:
         if not path.exists():return cls()
         if os.name!='nt' and path.stat().st_mode&0o077:raise ValueError('Flow configuration permissions must be 600')
         env=dotenv_values(path,interpolate=False)
+        return cls.from_values(env)
+
+    @classmethod
+    def from_values(cls,env):
         enabled=env.get('FLOW_TRACKING_ENABLED','false').lower()
         if enabled not in ('true','false'):raise ValueError('Invalid flow enabled flag')
         split=env.get('FLOW_PROVIDER_SPLIT_ENABLED','false').lower()
@@ -121,6 +125,14 @@ class HeaderCache:
         return previous is not None and previous[0]!=block_hash
     def head(self,header):
         return self.add(int(header['number'],16),header['hash'],int(header['timestamp'],16))
+
+
+def filter_queries(target):
+    if target['graduation_json']:
+        g=json.loads(target['graduation_json'])
+        return {'v4':{'address':g['pool_manager_address'],'topics':[SWAP,g['pool_id']]},
+                'hook':{'address':g['hooks'],'topics':[HOOK,g['pool_id']]}}
+    return {'curve':{'address':target['curve_address'],'topics':[[BUY,SELL]]}}
 
 
 def eligible_launches(main,now):
@@ -338,11 +350,7 @@ class FlowWorker:
         finally:self.pending.pop(number,None)
 
     def filters(self,t):
-        if t['graduation_json']:
-            g=json.loads(t['graduation_json'])
-            return {'v4':{'address':g['pool_manager_address'],'topics':[SWAP,g['pool_id']]},
-                    'hook':{'address':g['hooks'],'topics':[HOOK,g['pool_id']]}}
-        return {'curve':{'address':t['curve_address'],'topics':[[BUY,SELL]]}}
+        return filter_queries(t)
 
     def ensure_bootstrap_state(self,t):
         graduation=json.loads(t['graduation_json']) if t['graduation_json'] else None
@@ -601,9 +609,13 @@ class FlowWorker:
         self.db.set_state('heartbeat',now)
 
     async def run(self):
+        cutover=cutover_session(self.db)
+        if (self.settings.split_enabled and cutover and
+            cutover['state'] in ('CREATED','SHADOW_IN_PROGRESS','SHADOW_VERIFIED',
+                                 'STOP_AUTHORIZED','SOURCE_STOPPED','STOP_TAIL_VERIFIED')):
+            raise RpcError('Split start requires verified split configuration')
         if self.db.state('phase2b_coverage_start_at') is None:self.db.set_state('phase2b_coverage_start_at',time.time())
         self.db.set_state('service_status','starting')
-        cutover=cutover_session(self.db)
         if cutover and not self.settings.split_enabled and cutover['state'] in PENDING|{'FAILED'}:
             record_rollback(self.db,cutover,os.getpid())
         pending=bool(self.settings.split_enabled and cutover and cutover['state'] in PENDING)

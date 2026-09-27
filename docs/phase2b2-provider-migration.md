@@ -19,9 +19,13 @@ operator work. `new-session` requires a clean deploy, both healthy services and
 databases, legacy Alchemy route, split disabled, completed bootstrap, zero active
 gaps, service-user-readable protected config, and a terminal prior session.
 Its transaction and partial unique index allow at most one active session.
+`migrate-session-schema` installs the additive active-state index before a new
+attempt; it preserves the rolled-back historical row and its proof digest.
 The new `CREATED` record pins Git revision, source PID/start time, main PID,
 and provider-role fingerprint; all H values, target snapshot, and proof are empty.
-An empty `CREATED` attempt can be explicitly `abort-session`ed. These commands
+Any pre-stop attempt can be explicitly `abort-session --reason '...'`ed while
+the bound Alchemy source is still running and split is false. Its shadow proof
+remains immutable in the terminal `ABORTED_PRE_STOP` session. These commands
 do not stop services, switch providers, or query chain RPCs.
 
 Future shadow, stop-tail, ready-tail, and rollback proof uses stage and metadata
@@ -38,9 +42,10 @@ For inspection and explicit lifecycle management only:
 ```sh
 cd /opt/meme-scanner
 .venv/bin/python scripts/phase2b2_shadow.py status
+.venv/bin/python scripts/phase2b2_shadow.py migrate-session-schema
 .venv/bin/python scripts/phase2b2_shadow.py archive-legacy
 .venv/bin/python scripts/phase2b2_shadow.py new-session
-.venv/bin/python scripts/phase2b2_shadow.py abort-session
+.venv/bin/python scripts/phase2b2_shadow.py abort-session --reason 'target expired'
 ```
 
 `prefetch`, `preflight`, and the cutover commands remain separate, gated
@@ -57,6 +62,7 @@ command then refused that status. The 100-block normal limit remains unchanged.
 Successful stop-tail now advances the explicit active session in the flow
 database, pinned to fresh migration proof, `H_prefetch`, `H_stop`, provider roles,
 and target/filter snapshot. Its states are `STOP_TAIL_VERIFIED` →
+`SPLIT_CONFIGURED` →
 `SPLIT_WSS_CONNECTING` → `SUBSCRIPTIONS_READY` → `READY_TAIL_PENDING` →
 `READY_TAIL_VERIFIED` → `NORMAL_CONNECTED`. The split worker subscribes and
 stores canonical WSS events while pending, but defers ordinary startup recovery,
@@ -134,24 +140,37 @@ after this estimate. If the result is `MIGRATION_BLOCKED`, keep the old flow
 running; `prefetch` can extend the common head before another preflight.
 
 Only after `CUTOVER_PREFLIGHT_PASS`: capture service PIDs/restart counts, event
-and feature totals, budget, and recovery ledger. While the old flow process is
-still running, use the ownership-safe helper and repeat its service-user probe:
+and feature totals, budget, and recovery ledger. Keep the old Alchemy flow
+running with split disabled while validating the candidate offline and recording
+an exact, durable stop authorization:
 
 ```sh
+.venv/bin/python scripts/flow_config_status.py --candidate-preflight
+.venv/bin/python scripts/phase2b2_shadow.py authorize-stop
+.venv/bin/python scripts/phase2b2_shadow.py stop-flow
+.venv/bin/python scripts/phase2b2_shadow.py stop-tail
 .venv/bin/python scripts/flow_config_status.py --enable-split
 .venv/bin/python scripts/flow_config_status.py --preflight --require-split
-.venv/bin/python scripts/phase2b2_shadow.py stop-flow
 ```
 
-`--enable-split` creates the replacement inside protected `config/`, explicitly
+`authorize-stop` binds the source PID/start, revision, active-filter snapshot,
+head, budgets, provider roles, and safe candidate fingerprint. `stop-flow`
+rechecks them immediately before stopping. A changed target, bootstrap, gap,
+budget, config, or source refuses the stop. Its durable stop-command marker lets
+an operator reconcile a crash after the original process exits without issuing
+a second stop. Until `SOURCE_STOPPED`, the protected config must remain split
+disabled. `stop-tail` then proves the bounded gap on Validation HTTP.
+
+Only `STOP_TAIL_VERIFIED` permits `--enable-split`. It checks that the bound
+source is gone and the legacy config still matches the authorized candidate,
+then creates the replacement inside protected `config/`, explicitly
 sets the installed service user's uid/gid and mode 0600, fsyncs it, atomically
 replaces the file, fsyncs the directory, and tests readability as that user.
-The `stop-flow` command refuses to stop anything unless the exact service-user
-no-network startup probe and current tail budget pass. Do not use a direct
-`systemctl stop` for cutover. Run `stop-tail` immediately. It rechecks the budget
-against the actual `H_stop`, reconciles through that head, and promotes only
-verified filter cursors. A failure yields `ROLLBACK_REQUIRED`; use the flow-only
-rollback below. Do not start the new route with an unresolved stop tail.
+The resulting safe fingerprint must match the authorized one before
+`SPLIT_CONFIGURED` is persisted. A failed mutation restores the legacy flag.
+Do not use a direct `systemctl stop` for cutover. A stop-tail failure yields
+`ROLLBACK_REQUIRED`; use the flow-only rollback below. Do not start the new
+route with an unresolved stop tail or unconfigured split.
 
 Install the verified tree's `deploy/meme-scanner-flow.service` as the flow-only
 systemd unit, reload systemd, and start **only** `meme-scanner-flow.service`.

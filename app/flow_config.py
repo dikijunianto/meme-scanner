@@ -1,5 +1,7 @@
 """Protected flow configuration updates and network-free startup checks."""
 from dataclasses import replace
+import hashlib
+from io import StringIO
 import json
 import os
 from pathlib import Path
@@ -8,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from uuid import uuid4
+from dotenv import dotenv_values
 
 from app.config import ROOT, Config
 from app.flow_data import FlowDB
@@ -61,6 +64,46 @@ def split_contents(before, enabled):
         lines[matches[0]] = value
         return b''.join(lines)
     return before.rstrip(b'\n') + b'\n' + value
+
+
+def safe_split_fingerprint(settings, providers):
+    """Only safe routing identities and limits enter the authorization digest."""
+    safe={'split':settings.split_enabled,'chain_id':4663,
+          'roles':{'primary_wss':'publicnode','fallback_wss':'validation',
+                   'recovery_http':'validation'},'endpoints':providers.fingerprints(),
+          'limits':{name:getattr(settings,name) for name in
+                    ('daily_calls','minute_calls','daily_getlogs','daily_ws_bytes','max_subscriptions')}}
+    return hashlib.sha256(json.dumps(safe,sort_keys=True).encode()).hexdigest()
+
+
+def candidate_split_status(*, root=ROOT):
+    """Render and parse the candidate in memory; leave protected files untouched."""
+    path=Path(root)/'config/flow.env'
+    checked_file(path,path.parent)
+    before=path.read_bytes()
+    if b'FLOW_PROVIDER_SPLIT_ENABLED=true' in before:
+        raise ValueError('Production split is already enabled')
+    actual=FlowSettings.from_values(dotenv_values(stream=StringIO(before.decode()),interpolate=False))
+    candidate=FlowSettings.from_values(dotenv_values(
+        stream=StringIO(split_contents(before,True).decode()),interpolate=False))
+    if actual.split_enabled or not candidate.split_enabled:
+        raise ValueError('Candidate split flag is invalid')
+    providers=FlowProviders.load()
+    return {'candidate_fingerprint':safe_split_fingerprint(candidate,providers),
+            'actual_fingerprint':safe_split_fingerprint(actual,providers),
+            'legacy_file_digest':hashlib.sha256(before).hexdigest(),
+            'candidate_split':True}
+
+
+async def candidate_split_preflight():
+    proof=await prestart_check()
+    if not proof['no_network'] or not proof['candidate_split'] or not proof['readable_by_service_user']:
+        raise ValueError('Service-user candidate validation failed')
+    return {**candidate_split_status(),
+            'service_user_candidate_validated':True,
+            'readable_by_service_user':True,
+            'owner_uid':proof['owner_uid'],'owner_gid':proof['owner_gid'],
+            'mode':proof['mode'],'parent_mode':proof['parent_mode']}
 
 
 def atomic_split_update(enabled, *, root=ROOT, identity=None, readable=readable_as_service):
