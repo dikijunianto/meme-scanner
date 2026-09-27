@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import stat
@@ -130,12 +131,16 @@ class FlowConfigTests(unittest.IsolatedAsyncioTestCase):
         runner.worker.rpc.close = AsyncMock()
         old_rpc = MagicMock()
         old_rpc.close = AsyncMock()
+        cutover={'id':'fresh','state':'SHADOW_VERIFIED','revision':'checked',
+                 'main_pid':'1','source_legacy_pid':'2','targets':[]}
         with patch.object(script, 'verified_checkout', return_value='checked'), \
              patch.object(script, 'service', side_effect=[{'ActiveState': 'active', 'MainPID': '1'},
                                                          {'ActiveState': 'active', 'MainPID': '2'}]), \
              patch.object(script.FlowSettings, 'load', return_value=FlowSettings(split_enabled=True)), \
              patch.object(script, 'FlowDB'), patch.object(script.Config, 'load'), \
              patch.object(script.FlowProviders, 'load'), \
+             patch.object(script, 'active_cutover', return_value={'id':'fresh','payload':json.dumps(cutover)}), \
+             patch.object(script, 'filter_snapshot', return_value=[]), \
              patch.object(script, 'make_reconciler', return_value=(runner, old_rpc)), \
              patch.object(script, 'prestart_check', new_callable=AsyncMock, side_effect=ValueError('unreadable')), \
              patch.object(script.subprocess, 'run') as stop:
