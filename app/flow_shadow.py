@@ -7,7 +7,7 @@ import subprocess
 import time
 
 from app.config import ROOT
-from app.flow_cutover import save as save_cutover, session as cutover_session
+from app.flow_cutover import current as active_cutover, save as save_cutover, session as cutover_session
 from app.flow_data import BUY, SELL
 from app.flow_providers import provider
 from app.flow_worker import FlowBudget, FlowRpc, FlowWorker
@@ -91,11 +91,20 @@ class ShadowRpc(FlowRpc):
 
 
 class ShadowReconciler:
-    def __init__(self, worker):
+    def __init__(self, worker, session_id=None):
         self.worker = worker
         self.db = worker.db
+        self.session_id = session_id
         self.worker.rpc = ShadowRpc(worker.config, worker.settings, self.db, worker.providers)
         self._schema()
+
+    def stage(self, name):
+        # The stage key is part of the existing proof-table primary key. New
+        # cutovers cannot match proof from an older session or target bootstrap.
+        return f'cutover:{self.session_id}:{name}' if self.session_id else name
+
+    def _meta_key(self, key):
+        return f'cutover:{self.session_id}:{key}' if self.session_id else key
 
     def _schema(self):
         self.db.conn.executescript('''
@@ -117,13 +126,14 @@ class ShadowReconciler:
         ''')
 
     def meta(self, key):
-        row = self.db.conn.execute('SELECT value FROM flow_shadow_meta WHERE key=?', (key,)).fetchone()
+        row = self.db.conn.execute('SELECT value FROM flow_shadow_meta WHERE key=?',
+                                   (self._meta_key(key),)).fetchone()
         return row[0] if row else None
 
     def set_meta(self, key, value):
         with self.db.conn:
             self.db.conn.execute('INSERT INTO flow_shadow_meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
-                                 (key, str(value)))
+                                 (self._meta_key(key), str(value)))
 
     def periods(self, target, head):
         filters = self.worker.filters(target)
@@ -146,6 +156,9 @@ class ShadowReconciler:
         return min(start,max(base,gap)) if gap is not None else start
 
     def add_jobs(self, stage, first, head, target_ids=None):
+        if self.session_id and (not (current:=active_cutover(self.db)) or current['id']!=self.session_id):
+            raise RpcError('Cutover session changed before shadow planning')
+        scoped=self.stage(stage)
         if target_ids is None:
             targets = [dict(row) for row in self.db.conn.execute(
                 "SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial') ORDER BY launch_id")]
@@ -160,7 +173,7 @@ class ShadowReconciler:
                     if stage=='historical' and base>head:continue
                     row=self.db.conn.execute('''SELECT original_safe_start,reconciliation_upper_bound
                       FROM flow_shadow_jobs WHERE stage=? AND launch_id=? AND kind=?''',
-                      (stage,target['launch_id'],kind)).fetchone()
+                      (scoped,target['launch_id'],kind)).fetchone()
                     if row and stage=='historical':
                         gap=self.db.conn.execute('''SELECT min(first_block) FROM flow_gaps WHERE launch_id=?
                           AND resolved=0 AND reason IN ('ws_gap','reconnect_recovery_incomplete')
@@ -173,15 +186,16 @@ class ShadowReconciler:
                       (stage,launch_id,kind,original_safe_start,reconciliation_upper_bound,
                        next_unverified_block,highest_contiguous_verified_block,completion_status)
                       VALUES(?,?,?,?,?,?,?,?)''',
-                      (stage,target['launch_id'],kind,start,end,start,start-1,
+                      (scoped,target['launch_id'],kind,start,end,start,start-1,
                        'complete' if start > end else 'pending'))
                     row = self.db.conn.execute('''SELECT original_safe_start,reconciliation_upper_bound FROM flow_shadow_jobs
-                      WHERE stage=? AND launch_id=? AND kind=?''',(stage,target['launch_id'],kind)).fetchone()
+                      WHERE stage=? AND launch_id=? AND kind=?''',(scoped,target['launch_id'],kind)).fetchone()
                     if row[1] != end or row[0] > start:
                         raise RpcError('Shadow job boundaries changed; operator review required')
         return len(targets)
 
     async def start_historical(self):
+        scoped=self.stage('historical')
         head = self.meta('H_prefetch')
         if head is None:
             head = int(await self.worker.rpc.call('eth_blockNumber', []), 16)
@@ -195,24 +209,25 @@ class ShadowReconciler:
                     for target in targets:
                         for kind,_,base,end in self.periods(target,newer):
                             row=self.db.conn.execute('''SELECT original_safe_start,reconciliation_upper_bound,next_unverified_block
-                              FROM flow_shadow_jobs WHERE stage='historical' AND launch_id=? AND kind=?''',
-                              (target['launch_id'],kind)).fetchone()
+                              FROM flow_shadow_jobs WHERE stage=? AND launch_id=? AND kind=?''',
+                              (scoped,target['launch_id'],kind)).fetchone()
                             if row:
                                 if row[1]>end or row[2]!=(row[0] if row[0]>row[1] else row[1]+1):
                                     raise RpcError('Historical filter changed before head extension')
                                 if end>row[1]:
                                     self.db.conn.execute('''UPDATE flow_shadow_jobs SET reconciliation_upper_bound=?,
-                                      completion_status=? WHERE stage='historical' AND launch_id=? AND kind=?''',
-                                      (end,'complete' if row[0]>end else 'pending',target['launch_id'],kind))
+                                      completion_status=? WHERE stage=? AND launch_id=? AND kind=?''',
+                                      (end,'complete' if row[0]>end else 'pending',scoped,target['launch_id'],kind))
                             else:
                                 start=self.historical_start(target,kind,base,newer)
                                 self.db.conn.execute('''INSERT INTO flow_shadow_jobs
                                   (stage,launch_id,kind,original_safe_start,reconciliation_upper_bound,
                                    next_unverified_block,highest_contiguous_verified_block,completion_status)
-                                  VALUES('historical',?,?,?,?,?,?,?)''',
-                                  (target['launch_id'],kind,start,end,start,start-1,
+                                  VALUES(?,?,?,?,?,?,?,?)''',
+                                  (scoped,target['launch_id'],kind,start,end,start,start-1,
                                    'complete' if start>end else 'pending'))
-                    self.db.conn.execute('''UPDATE flow_shadow_meta SET value=? WHERE key='H_prefetch' ''',(str(newer),))
+                    self.db.conn.execute('''UPDATE flow_shadow_meta SET value=? WHERE key=?''',
+                                         (str(newer),self._meta_key('H_prefetch')))
                 head=newer
         head = int(head)
         # Existing jobs may have aged out; newly active filters are added here.
@@ -220,10 +235,11 @@ class ShadowReconciler:
         return head
 
     def complete(self, stage):
-        if not self.db.conn.execute('SELECT 1 FROM flow_shadow_jobs WHERE stage=? LIMIT 1',(stage,)).fetchone():
+        scoped=self.stage(stage)
+        if not self.db.conn.execute('SELECT 1 FROM flow_shadow_jobs WHERE stage=? LIMIT 1',(scoped,)).fetchone():
             return False
         return not self.db.conn.execute('''SELECT 1 FROM flow_shadow_jobs
-          WHERE stage=? AND completion_status!='complete' LIMIT 1''',(stage,)).fetchone()
+          WHERE stage=? AND completion_status!='complete' LIMIT 1''',(scoped,)).fetchone()
 
     def fail_range(self, key, first, last, exc):
         with self.db.conn:
@@ -237,8 +253,11 @@ class ShadowReconciler:
         raise RpcError('Shadow target filter changed')
 
     async def run_stage(self, stage):
-        for job in self.db.conn.execute('SELECT * FROM flow_shadow_jobs WHERE stage=? ORDER BY launch_id,kind',(stage,)).fetchall():
-            key=(stage,job['launch_id'],job['kind'])
+        if self.session_id and (not (current:=active_cutover(self.db)) or current['id']!=self.session_id):
+            raise RpcError('Cutover session changed before proof')
+        scoped=self.stage(stage)
+        for job in self.db.conn.execute('SELECT * FROM flow_shadow_jobs WHERE stage=? ORDER BY launch_id,kind',(scoped,)).fetchall():
+            key=(scoped,job['launch_id'],job['kind'])
             target=self.db.target(job['launch_id'])
             if not target:raise RpcError('Shadow target disappeared')
             query=self._query(job,target)
@@ -284,7 +303,7 @@ class ShadowReconciler:
                             if (job['kind']=='curve' and position>=boundary) or (job['kind']!='curve' and position<=boundary):continue
                         if not item.get('blockTimestamp'):
                             item['blockTimestamp']=hex(await self.worker.header(block))
-                        if self.worker.ingest(target,item,shadow=stage) is False:
+                        if self.worker.ingest(target,item,shadow=scoped) is False:
                             raise RpcError('Shadow event rejected')
                 except (RpcError,FlowBudget) as exc:
                     self.fail_range(key,current,end,exc)
@@ -297,15 +316,16 @@ class ShadowReconciler:
                       completion_status=?,recovered_raw_events=?,duplicates_ignored=?
                       WHERE stage=? AND launch_id=? AND kind=?''',
                       (end+1,end,'complete' if end==last else 'pending',
-                       self.db.used(f'flow_shadow_events_stored:{stage}:{job["launch_id"]}:{job["kind"]}',0),
-                       self.db.used(f'flow_shadow_duplicates:{stage}:{job["launch_id"]}:{job["kind"]}',0),*key))
+                       self.db.used(f'flow_shadow_events_stored:{scoped}:{job["launch_id"]}:{job["kind"]}',0),
+                       self.db.used(f'flow_shadow_duplicates:{scoped}:{job["launch_id"]}:{job["kind"]}',0),*key))
                 current=end+1
             self.worker.rpc.job=None
         return self.complete(stage)
 
     def summary(self, stage):
-        jobs=[dict(row) for row in self.db.conn.execute('SELECT * FROM flow_shadow_jobs WHERE stage=? ORDER BY launch_id,kind',(stage,))]
-        sizes=[r[0]-r[1]+1 for r in self.db.conn.execute('SELECT last_block,first_block FROM flow_shadow_ranges WHERE stage=?',(stage,))]
+        scoped=self.stage(stage)
+        jobs=[dict(row) for row in self.db.conn.execute('SELECT * FROM flow_shadow_jobs WHERE stage=? ORDER BY launch_id,kind',(scoped,))]
+        sizes=[r[0]-r[1]+1 for r in self.db.conn.execute('SELECT last_block,first_block FROM flow_shadow_ranges WHERE stage=?',(scoped,))]
         by_type={kind:sum(j['recovered_raw_events'] for j in jobs if j['kind']==kind)
                  for kind in ('curve','v4','hook')}
         return {'stage':stage,'jobs':jobs,'complete':self.complete(stage),'blocks_verified':sum(
@@ -323,10 +343,11 @@ class ShadowReconciler:
         if not self.complete('historical'):raise RpcError('Historical shadow reconciliation incomplete')
         first=int(self.meta('H_prefetch'))+1
         sizes=[r[0]-r[1]+1 for r in self.db.conn.execute('''SELECT last_block,first_block
-          FROM flow_shadow_ranges WHERE stage='historical' AND was_terminal=0''')]
+          FROM flow_shadow_ranges WHERE stage=? AND was_terminal=0''',(self.stage('historical'),))]
         if not sizes:
             sizes=[r[0]-r[1]+1 for r in self.db.conn.execute(
-                "SELECT last_block,first_block FROM flow_shadow_ranges WHERE stage='historical'")]
+                "SELECT last_block,first_block FROM flow_shadow_ranges WHERE stage=?",
+                (self.stage('historical'),))]
         if not sizes:raise RpcError('No measured successful recovery chunk')
         span=min(sizes)
         ranges=[(t['launch_id'],kind,max(first,base),end) for t in
@@ -343,7 +364,8 @@ class ShadowReconciler:
         """Close only the named restart gaps after four contiguous durable proofs."""
         if len(set(gap_ids))!=3 or self.meta('H_rollback_restart')!=str(head):
             raise RpcError('Rollback restart proof identity changed')
-        stages=('historical','stop_tail','rollback_tail','rollback_restart_tail')
+        stages=tuple(self.stage(s) for s in
+                     ('historical','stop_tail','rollback_tail','rollback_restart_tail'))
         at=int(time.time())
         with self.db.conn:
             if self.db.state('current_wss_provider')!='alchemy':
@@ -360,7 +382,7 @@ class ShadowReconciler:
                 launch=gap['launch_id']
                 jobs={row['stage']:row for row in self.db.conn.execute('''SELECT stage,original_safe_start,
                   highest_contiguous_verified_block,completion_status FROM flow_shadow_jobs
-                  WHERE launch_id=? AND kind='curve' AND stage IN ('historical','stop_tail','rollback_tail','rollback_restart_tail')''',(launch,))}
+                  WHERE launch_id=? AND kind='curve' AND stage IN (?,?,?,?)''',(launch,*stages))}
                 if (set(jobs)!=set(stages) or any(j['completion_status']!='complete' for j in jobs.values()) or
                     jobs[stages[0]]['original_safe_start']>gap['first_block'] or
                     any(jobs[a]['highest_contiguous_verified_block']+1!=jobs[b]['original_safe_start']
@@ -391,7 +413,8 @@ class ShadowReconciler:
         """Close named expired-target gaps only across three contiguous verified stages."""
         if len(set(gap_ids))!=len(gap_ids) or not self.complete('failed_cutover_cleanup_tail'):
             raise RpcError('Failed-cutover cleanup proof is incomplete')
-        stages=('historical','stop_tail','failed_cutover_cleanup_tail')
+        stages=tuple(self.stage(s) for s in
+                     ('historical','stop_tail','failed_cutover_cleanup_tail'))
         with self.db.conn:
             resolved=[]
             for gap_id in gap_ids:
@@ -406,8 +429,8 @@ class ShadowReconciler:
                     raise RpcError('Failed-cutover cleanup requires an expired target')
                 jobs={r['stage']:r for r in self.db.conn.execute('''SELECT stage,original_safe_start,
                   highest_contiguous_verified_block,completion_status FROM flow_shadow_jobs
-                  WHERE launch_id=? AND kind='curve' AND stage IN ('historical','stop_tail',
-                  'failed_cutover_cleanup_tail')''',(gap['launch_id'],))}
+                  WHERE launch_id=? AND kind='curve' AND stage IN (?,?,?)''',
+                  (gap['launch_id'],*stages))}
                 if (set(jobs)!=set(stages) or any(j['completion_status']!='complete' for j in jobs.values()) or
                     jobs[stages[0]]['original_safe_start']>gap['first_block'] or
                     any(jobs[a]['highest_contiguous_verified_block']+1!=jobs[b]['original_safe_start']
@@ -422,11 +445,14 @@ class ShadowReconciler:
         return resolved
 
     def promote(self, stage):
+        if self.session_id and (not (current:=active_cutover(self.db)) or current['id']!=self.session_id):
+            raise RpcError('Cutover session changed before promotion')
         if not self.complete(stage):raise RpcError('Cannot promote incomplete shadow stage')
+        scoped=self.stage(stage)
         if stage=='wss_ready_tail' and (cutover:=cutover_session(self.db)) and cutover['state']!='READY_TAIL_PENDING':
             raise RpcError('Cutover state changed before ready-tail promotion')
         with self.db.conn:
-            for job in self.db.conn.execute('SELECT * FROM flow_shadow_jobs WHERE stage=?',(stage,)):
+            for job in self.db.conn.execute('SELECT * FROM flow_shadow_jobs WHERE stage=?',(scoped,)):
                 if job['highest_contiguous_verified_block']>=job['original_safe_start']:
                     self.db.conn.execute('''INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key)
                       DO UPDATE SET value=max(cast(value AS INTEGER),cast(excluded.value AS INTEGER))''',
@@ -435,7 +461,9 @@ class ShadowReconciler:
                 if not self.complete('historical') or not self.complete('stop_tail'):
                     raise RpcError('Shadow handoff has incomplete prior stage')
                 head=int(self.meta('H_live'));at=int(self.meta('H_live_at'))
-                for (launch,) in self.db.conn.execute("SELECT DISTINCT launch_id FROM flow_shadow_jobs WHERE stage='wss_ready_tail'"):
+                for (launch,) in self.db.conn.execute(
+                    "SELECT DISTINCT launch_id FROM flow_shadow_jobs WHERE stage=?",
+                    (self.stage('wss_ready_tail'),)):
                     target=self.db.target(launch)
                     if not target:continue
                     gaps=self.db.conn.execute('''SELECT id,first_block,end_at FROM flow_gaps WHERE launch_id=?
@@ -450,8 +478,9 @@ class ShadowReconciler:
                             covered=start-1
                             ranges=self.db.conn.execute('''SELECT original_safe_start,highest_contiguous_verified_block
                               FROM flow_shadow_jobs WHERE launch_id=? AND kind=? AND completion_status='complete'
-                              AND stage IN ('historical','stop_tail','wss_ready_tail') ORDER BY original_safe_start''',
-                              (launch,kind)).fetchall()
+                              AND stage IN (?,?,?) ORDER BY original_safe_start''',
+                              (launch,kind,self.stage('historical'),self.stage('stop_tail'),
+                               self.stage('wss_ready_tail'))).fetchall()
                             for low,high in ranges:
                                 if low<=covered+1:covered=max(covered,high)
                             if covered<end:proved=False;break
@@ -469,15 +498,17 @@ class ShadowReconciler:
                         first=max(cutover['H_stop']+1,target['base'])
                         if first>head:continue
                         job=self.db.conn.execute('''SELECT original_safe_start,highest_contiguous_verified_block,
-                          completion_status FROM flow_shadow_jobs WHERE stage='wss_ready_tail'
-                          AND launch_id=? AND kind=?''',(target['launch_id'],target['kind'])).fetchone()
+                          completion_status FROM flow_shadow_jobs WHERE stage=?
+                          AND launch_id=? AND kind=?''',
+                          (self.stage('wss_ready_tail'),target['launch_id'],target['kind'])).fetchone()
                         if not job or job['original_safe_start']!=first or job['highest_contiguous_verified_block']!=head or job['completion_status']!='complete':
                             raise RpcError('Cutover target has no complete ready-tail proof')
                     for target in cutover['targets']:
                         if self.db.conn.execute('''SELECT 1 FROM flow_gaps WHERE launch_id=? AND resolved=0
                           AND id>? LIMIT 1''',(target['launch_id'],cutover['gap_id_before'])).fetchone():
                             raise RpcError('Unexpected cutover gap remains')
-                    cutover=dict(cutover,state='READY_TAIL_VERIFIED',ready_tail_verified=True)
+                    cutover=dict(cutover,state='READY_TAIL_VERIFIED',ready_tail_verified=True,
+                                 ready_tail_proof='verified')
                     cutover['history']=[*cutover['history'],['READY_TAIL_VERIFIED',time.time()]]
                     save_cutover(self.db,cutover)
                     self.db.conn.execute('''INSERT INTO flow_state VALUES('cutover_state','ready_tail_verified')
@@ -486,8 +517,8 @@ class ShadowReconciler:
                       ON CONFLICT(key) DO UPDATE SET value=excluded.value''',(str(head),))
 
 
-def make_reconciler(config, settings, db, providers):
+def make_reconciler(config, settings, db, providers, session_id=None):
     worker=FlowWorker(config,settings,db,providers)
     old=worker.rpc
-    runner=ShadowReconciler(worker)
+    runner=ShadowReconciler(worker,session_id=session_id)
     return runner,old

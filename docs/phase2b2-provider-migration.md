@@ -1,5 +1,51 @@
 # Phase 2B.2 provider split: shadow-first cutover
 
+## Cutover-session lifecycle (Phase 2B.2.4)
+
+The original `flow_shadow_meta` revision/PID pin and unprefixed
+`flow_shadow_jobs`/`flow_shadow_ranges` belong to the rolled-back attempt.
+They remain unchanged. `archive-legacy` explicitly imports their identity and
+SHA-256 proof digest as a terminal `ROLLED_BACK` row in the additive
+`flow_cutover_sessions` table. `flow_cutover_legacy_proof` maps each old job and
+range to that session without editing the original rows. The import requires
+the old PID to be gone, Alchemy to be active, and the historical and stop-tail
+jobs to be complete. It is idempotent.
+
+`status` opens the flow DB read-only and makes no RPC calls. It reports the
+historical terminal sessions, any active session, current Git revision, service
+PIDs, split flag, provider, and fresh proof counts. A revision mismatch on a
+terminal session is informational; an active-session mismatch blocks further
+operator work. `new-session` requires a clean deploy, both healthy services and
+databases, legacy Alchemy route, split disabled, completed bootstrap, zero active
+gaps, service-user-readable protected config, and a terminal prior session.
+Its transaction and partial unique index allow at most one active session.
+The new `CREATED` record pins Git revision, source PID/start time, main PID,
+and provider-role fingerprint; all H values, target snapshot, and proof are empty.
+An empty `CREATED` attempt can be explicitly `abort-session`ed. These commands
+do not stop services, switch providers, or query chain RPCs.
+
+Future shadow, stop-tail, ready-tail, and rollback proof uses stage and metadata
+keys prefixed `cutover:<session-id>:`. The legacy unprefixed ranges can never
+satisfy a fresh session. The target bootstrap ledger retains its separate
+proof semantics. Before flow stop, the bound source PID and start time must
+match. After stop, absence of that PID is expected; split and rollback PIDs
+are recorded independently. A fresh shadow captures only filters active at
+that time, with completed bootstrap and recovery cursors. It does not invent
+a filter when none are active.
+
+For inspection and explicit lifecycle management only:
+
+```sh
+cd /opt/meme-scanner
+.venv/bin/python scripts/phase2b2_shadow.py status
+.venv/bin/python scripts/phase2b2_shadow.py archive-legacy
+.venv/bin/python scripts/phase2b2_shadow.py new-session
+.venv/bin/python scripts/phase2b2_shadow.py abort-session
+```
+
+`prefetch`, `preflight`, and the cutover commands remain separate, gated
+operations; creating a session is not authorization to run them.
+
 ## Durable startup handoff (Phase 2B.2.3)
 
 The failed 2026-09-26 cutover exposed a gate cycle: split WSS connected and
@@ -8,8 +54,8 @@ Validation HTTP ready-tail. Its pinned range was 73,211,566..73,211,741
 (176 blocks), so it correctly reported `unrecoverable_gap`; the old ready-tail
 command then refused that status. The 100-block normal limit remains unchanged.
 
-Successful stop-tail now writes a durable `phase2b2_cutover_session` in the flow
-database, pinned to the migration ledger, `H_prefetch`, `H_stop`, provider roles,
+Successful stop-tail now advances the explicit active session in the flow
+database, pinned to fresh migration proof, `H_prefetch`, `H_stop`, provider roles,
 and target/filter snapshot. Its states are `STOP_TAIL_VERIFIED` →
 `SPLIT_WSS_CONNECTING` → `SUBSCRIPTIONS_READY` → `READY_TAIL_PENDING` →
 `READY_TAIL_VERIFIED` → `NORMAL_CONNECTED`. The split worker subscribes and

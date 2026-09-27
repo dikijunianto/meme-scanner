@@ -1,6 +1,7 @@
 """The planned handoff is durable; ordinary recovery still owns every other gap."""
 import asyncio
 import copy
+import json
 from dataclasses import replace
 from pathlib import Path
 import sys
@@ -10,7 +11,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from app.config import Config
-from app.flow_cutover import gap_counts, new, save, session
+from app.flow_cutover import advance, create, gap_counts, new, save, schema, session
 from app.flow_data import FlowDB
 from app.flow_providers import FlowProviders
 from app.flow_shadow import make_reconciler
@@ -56,9 +57,18 @@ class CutoverTests(unittest.IsolatedAsyncioTestCase):
     async def prepared(self,head=None,logs=()):
         head=head or self.base+184
         calls=self.rpc(head,logs)
+        schema(self.db)
+        with self.db.conn:self.db.conn.execute('''INSERT INTO flow_cutover_sessions
+          (id,created_at_utc,deploy_git_revision,source_route,source_legacy_pid,status,payload)
+          VALUES('old','2026-09-01T00:00:00Z','old-revision','alchemy','old-pid','ROLLED_BACK',?)''',
+          (json.dumps({'id':'old','state':'ROLLED_BACK','revision':'old-revision'}),))
+        created=create(self.db,revision='test',source_pid='old',source_start='1',
+                       main_pid='main',roles_fingerprint='roles')
+        self.runner.session_id=created['id']
         self.runner.set_meta('H_prefetch',self.base+5)
         self.runner.add_jobs('historical',0,self.base+5)
         self.assertTrue(await self.runner.run_stage('historical'))
+        advance(self.db,created,'SHADOW_VERIFIED',H_prefetch=self.base+5,shadow_proof='verified')
         self.runner.set_meta('H_stop',self.base+8)
         self.runner.add_jobs('stop_tail',self.base+6,self.base+8)
         self.assertTrue(await self.runner.run_stage('stop_tail'))
@@ -163,6 +173,7 @@ class CutoverTests(unittest.IsolatedAsyncioTestCase):
           curve_subscriptions,v4_subscriptions,hook_subscriptions,db_bytes) VALUES(?,1,1,1,0,0,0)''',(next_sample,))
         self.runner.set_meta('main_pid','main')
         self.runner.set_meta('old_flow_pid','old')
+        advance(self.db,session(self.db),'READY_TAIL_PENDING',split_pid='new')
         sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
         from scripts import phase2b2_shadow
         def service(name):
@@ -200,7 +211,7 @@ class CutoverTests(unittest.IsolatedAsyncioTestCase):
         try:
             with patch('app.flow_worker.connect',return_value=Cancel()):
                 with self.assertRaises(asyncio.CancelledError):await legacy.run()
-            self.assertEqual(session(self.db)['state'],'FAILED')
+            self.assertEqual(session(self.db)['state'],'ROLLED_BACK')
         finally:
             await legacy.rpc.close();legacy.main.close()
 

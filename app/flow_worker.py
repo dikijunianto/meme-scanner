@@ -15,7 +15,8 @@ from eth_abi.exceptions import DecodingError
 
 from app.config import Config, ROOT
 from app.flow_cutover import (PENDING, advance as advance_cutover, gap_counts,
-                              save as save_cutover, session as cutover_session, unexpected_gap)
+                              record_rollback, save as save_cutover,
+                              session as cutover_session, unexpected_gap)
 from app.flow_providers import FlowProviders, provider
 from app.flow_data import FlowDB, BUY, SELL, SWAP, HOOK, decode_event, stamp, iso, WINDOWS
 from app.rpc import Rpc, RpcError, LogRangeError, retry_delay
@@ -160,7 +161,7 @@ class FlowWorker:
                 advance_cutover(self.db,value,'FAILED',failure='Verified cursor missing')
                 self.db.set_state('service_status','cutover_failed')
                 return True
-            advance_cutover(self.db,value,'NORMAL_CONNECTED')
+            advance_cutover(self.db,value,'NORMAL_CONNECTED',ready_tail_proof='verified')
             self.db.set_state('recovery_state','healthy')
             self.db.set_state('service_status','connected')
             return False
@@ -208,7 +209,8 @@ class FlowWorker:
             if value['state'] not in ('SUBSCRIPTIONS_READY','READY_TAIL_PENDING'):
                 value=advance_cutover(self.db,value,'SUBSCRIPTIONS_READY',
                                       subscription_ready_at=time.time(),
-                                      subscription_ready_provider=self.ws_provider)
+                                      subscription_ready_provider=self.ws_provider,
+                                      subscription_ack='verified')
             if value['state']=='SUBSCRIPTIONS_READY':advance_cutover(self.db,value,'READY_TAIL_PENDING')
         self.db.set_state('service_status','cutover_handoff_pending')
         self.db.set_state('connection_state','connected')
@@ -602,10 +604,10 @@ class FlowWorker:
         if self.db.state('phase2b_coverage_start_at') is None:self.db.set_state('phase2b_coverage_start_at',time.time())
         self.db.set_state('service_status','starting')
         cutover=cutover_session(self.db)
-        if cutover and not self.settings.split_enabled and cutover['state'] in PENDING:
-            advance_cutover(self.db,cutover,'FAILED',failure='Legacy rollback before handoff proof')
+        if cutover and not self.settings.split_enabled and cutover['state'] in PENDING|{'FAILED'}:
+            record_rollback(self.db,cutover,os.getpid())
         pending=bool(self.settings.split_enabled and cutover and cutover['state'] in PENDING)
-        if pending:advance_cutover(self.db,cutover,'SPLIT_WSS_CONNECTING')
+        if pending:advance_cutover(self.db,cutover,'SPLIT_WSS_CONNECTING',split_pid=str(os.getpid()))
         self.dirty.update(r[0] for r in self.db.conn.execute("SELECT launch_id FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')"))
         if self.db.state('connected_once') and not pending:
             for t in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')").fetchall():
