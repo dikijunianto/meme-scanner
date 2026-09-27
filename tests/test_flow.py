@@ -212,6 +212,7 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
             if span>2:raise LogRangeError('range')
             return []
         self.worker.rpc.call=AsyncMock(side_effect=rpc)
+        self.db.set_state('recovery:1:curve',0)
         await self.worker.recover_plans([(self.t,'curve',self.worker.filters(self.t)['curve'],'recovery:1:curve',1,20)])
         self.assertEqual(queries[:3],[10,5,2])
         self.assertEqual(self.db.state('recovery:1:curve'),'20')
@@ -227,6 +228,51 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(FlowBudget):self.worker.recovery_plan(self.t,base+gap)
         self.db.set_state('recovery:1:curve',base+94)
         self.assertEqual(self.worker.recovery_plan(self.t,base+95)[0][4:6],(base+92,base+95))
+
+    async def test_missing_cursor_requires_proof_and_feature_is_conservative(self):
+        base=self.t['launch_block']
+        self.worker.ensure_bootstrap_state(self.t)
+        self.assertEqual(self.db.conn.execute('SELECT status FROM flow_bootstrap').fetchone()[0],'required')
+        self.db.rebuild(self.t,5000)
+        self.assertNotEqual(self.db.conn.execute('SELECT coverage_quality FROM flow_features LIMIT 1').fetchone()[0],'complete')
+        self.worker.rpc.call=AsyncMock(return_value=[])
+        await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+20))
+        self.assertEqual(self.db.state('recovery:1:curve'),str(base+20))
+        self.assertEqual(self.db.conn.execute('SELECT status FROM flow_bootstrap').fetchone()[0],'complete')
+        self.assertEqual(self.db.conn.execute("SELECT count(*) FROM flow_gaps WHERE resolved=0 AND reason LIKE 'bootstrap_required:%'").fetchone()[0],0)
+
+    async def test_missing_cursor_failed_chunk_stays_unknown_until_retry(self):
+        base=self.t['launch_block'];calls=0
+        async def rpc(method,args):
+            nonlocal calls
+            calls+=1
+            if calls==2:raise RpcError('offline')
+            return []
+        self.worker.rpc.call=AsyncMock(side_effect=rpc)
+        with self.assertRaises(RpcError):
+            await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+20))
+        self.assertIsNone(self.db.state('recovery:1:curve'))
+        self.assertEqual(self.db.conn.execute('SELECT status FROM flow_bootstrap').fetchone()[0],'in_progress')
+        self.worker.rpc.call=AsyncMock(return_value=[])
+        await self.worker.recover_plans(self.worker.recovery_plan(self.t,base+20))
+        self.assertEqual(self.db.state('recovery:1:curve'),str(base+20))
+
+    async def test_graduation_and_long_cohort_keep_filter_bootstrap_identity(self):
+        base=self.t['launch_block'];g=fixture('v4_buy')['launch'];g['block_number']=base+20
+        with self.db.conn:self.db.conn.execute('UPDATE flow_tracking_targets SET graduation_json=?,cohort_long=0 WHERE launch_id=1',(json.dumps(g),))
+        self.worker.ensure_bootstrap_state(self.db.target(1))
+        self.assertEqual({r['kind']:r['safe_start'] for r in self.db.conn.execute('SELECT kind,safe_start FROM flow_bootstrap')},
+                         {'curve':base,'v4':base+20,'hook':base+20})
+        self.db.complete_bootstrap(1,'curve',base+20)
+        with self.db.conn:self.db.conn.execute('UPDATE flow_tracking_targets SET cohort_long=1 WHERE launch_id=1')
+        self.worker.ensure_bootstrap_state(self.db.target(1))
+        self.assertEqual(self.db.state('recovery:1:curve'),str(base+20))
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_bootstrap').fetchone()[0],3)
+
+    async def test_existing_cursor_still_has_unchanged_100_block_limit(self):
+        base=self.t['launch_block'];self.db.set_state('recovery:1:curve',base)
+        with self.assertRaises(FlowBudget) as caught:self.worker.recovery_plan(self.t,base+101)
+        self.assertEqual(caught.exception.scope,'recovery_range')
 
     async def test_nine_targets_have_independent_safe_cursors(self):
         base=self.t['launch_block'];last=base+95
@@ -270,6 +316,7 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_partial_provider_failure_keeps_last_complete_chunk(self):
         base=self.t['launch_block'];calls=0
+        self.db.set_state('recovery:1:curve',base)
         async def rpc(method,args):
             nonlocal calls
             calls+=1
@@ -284,6 +331,7 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_recovery_budget_keeps_completed_chunks_without_false_calls(self):
         base=self.t['launch_block'];self.settings.daily_getlogs=1
+        self.db.set_state('recovery:1:curve',base)
         async def answer(rpc,payload,method):
             return {'jsonrpc':'2.0','id':payload['id'],'result':[]}
         with patch.object(Rpc,'_send',answer) as send:
@@ -296,11 +344,7 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
     async def test_crash_after_event_commit_replays_without_second_row(self):
         base=self.t['launch_block'];e=event(self.t)
         self.worker.rpc.call=AsyncMock(return_value=[copy.deepcopy(e)])
-        original=self.db.set_state
-        def crash(key,value):
-            if key=='recovery:1:curve':raise OSError('simulated crash')
-            return original(key,value)
-        with patch.object(self.db,'set_state',side_effect=crash):
+        with patch.object(self.db,'complete_bootstrap',side_effect=OSError('simulated crash')):
             with self.assertRaises(OSError):
                 await self.worker.recover_plans(self.worker.recovery_plan(self.t,base))
         self.assertIsNone(self.db.state('recovery:1:curve'))
@@ -481,8 +525,8 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         with patch('app.flow_worker.time.time',return_value=1100):await self.worker.reconcile()
         self.assertEqual(self.db.state('recovery:1:curve'),None)
         self.assertEqual(self.db.state('recovery:2:curve'),str(base+120))
-        self.assertEqual(self.db.state('recovery_rejection_scope'),'recovery_range')
-        self.assertEqual(self.db.conn.execute("SELECT count(*) FROM flow_gaps WHERE launch_id=1 AND resolved=0").fetchone()[0],1)
+        self.assertEqual(self.db.state('recovery_rejection_scope'),'bootstrap_required')
+        self.assertGreaterEqual(self.db.conn.execute("SELECT count(*) FROM flow_gaps WHERE launch_id=1 AND resolved=0").fetchone()[0],1)
         self.worker.rpc.call.reset_mock()
         with patch('app.flow_worker.time.time',return_value=1102):await self.worker.reconcile()
         self.worker.rpc.call.assert_not_awaited()
@@ -550,7 +594,7 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.settings.max_subscriptions=1;self.worker.subscriptions[(99,'curve')]='other'
         self.worker.discover=AsyncMock()
         with patch('app.flow_worker.time.time',return_value=1100):await self.worker.reconcile()
-        self.assertEqual(self.db.conn.execute('SELECT reason FROM flow_gaps LIMIT 1').fetchone()[0],'provider_budget')
+        self.assertTrue(self.db.conn.execute("SELECT 1 FROM flow_gaps WHERE reason='provider_budget'").fetchone())
         self.assertEqual(self.main.execute('PRAGMA integrity_check').fetchone()[0],'ok')
 
     async def test_ws_budget_counts_packet_then_stops_only_flow(self):

@@ -167,8 +167,53 @@ class FlowDB:
           PRIMARY KEY(minute,metric));
         CREATE TABLE IF NOT EXISTS flow_samples(at REAL PRIMARY KEY,active INTEGER,subscriptions INTEGER,
           curve_subscriptions INTEGER,v4_subscriptions INTEGER,hook_subscriptions INTEGER,db_bytes INTEGER);
+        CREATE TABLE IF NOT EXISTS flow_bootstrap(
+          launch_id INTEGER NOT NULL,kind TEXT NOT NULL,safe_start INTEGER NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('required','in_progress','complete')),
+          completed_head INTEGER,created_at REAL NOT NULL,completed_at REAL,
+          PRIMARY KEY(launch_id,kind));
+        CREATE TABLE IF NOT EXISTS flow_bootstrap_identity(
+          stage TEXT NOT NULL,launch_id INTEGER NOT NULL,kind TEXT NOT NULL,
+          query_json TEXT NOT NULL,upper_at REAL NOT NULL,
+          PRIMARY KEY(stage,launch_id,kind));
         ''')
         self.conn.commit()
+
+    def require_bootstrap(self,target,kind,safe_start):
+        """Make unknown completeness durable before a target can claim coverage."""
+        launch=target['launch_id'];key=f'recovery:{launch}:{kind}'
+        if self.state(key) is not None:return False
+        row=self.conn.execute('SELECT safe_start,status FROM flow_bootstrap WHERE launch_id=? AND kind=?',(launch,kind)).fetchone()
+        if row:
+            if row['safe_start']!=safe_start or row['status']=='complete':
+                raise ValueError('Bootstrap identity conflicts with recovery cursor')
+            return True
+        at=stamp(json.loads(target['graduation_json'])['block_timestamp']) if kind!='curve' and target['graduation_json'] else target['tracking_start_at']
+        with self.conn:
+            self.conn.execute('INSERT INTO flow_bootstrap VALUES(?,?,?,?,?,?,?)',
+                              (launch,kind,safe_start,'required',None,time.time(),None))
+            self.conn.execute('INSERT INTO flow_gaps(launch_id,start_at,end_at,reason,first_block) VALUES(?,?,?,?,?)',
+                              (launch,at,at,f'bootstrap_required:{kind}',safe_start))
+            self.conn.execute("UPDATE flow_features SET coverage_quality='partial',coverage_reason=? WHERE launch_id=?",
+                              (f'bootstrap_required:{kind}',launch))
+        return True
+
+    def complete_bootstrap(self,launch,kind,head):
+        """Called only after full contiguous HTTP proof has committed."""
+        with self.conn:
+            row=self.conn.execute('SELECT safe_start,status,completed_head FROM flow_bootstrap WHERE launch_id=? AND kind=?',
+                                  (launch,kind)).fetchone()
+            if not row:raise ValueError('Bootstrap state missing')
+            if row['status']=='complete':
+                if row['completed_head']>head:return
+            else:
+                self.conn.execute("UPDATE flow_bootstrap SET status='complete',completed_head=?,completed_at=? WHERE launch_id=? AND kind=?",
+                                  (head,time.time(),launch,kind))
+            self.conn.execute('''INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key)
+              DO UPDATE SET value=max(cast(value AS INTEGER),cast(excluded.value AS INTEGER))''',
+                              (f'recovery:{launch}:{kind}',str(head)))
+            self.conn.execute("UPDATE flow_gaps SET resolved=1 WHERE launch_id=? AND reason=? AND first_block=?",
+                              (launch,f'bootstrap_required:{kind}',row['safe_start']))
 
     def state(self,key,default=None):
         r=self.conn.execute('SELECT value FROM flow_state WHERE key=?',(key,)).fetchone()
@@ -252,6 +297,8 @@ class FlowDB:
             gaps=self.conn.execute('SELECT reason FROM flow_gaps WHERE launch_id=? AND start_at<=? AND end_at>=? AND resolved=0',
                     (target['launch_id'],end,target['tracking_start_at'])).fetchall()
             reasons=sorted({r[0] for r in gaps})
+            if self.conn.execute("SELECT 1 FROM flow_bootstrap WHERE launch_id=? AND status!='complete' LIMIT 1",
+                                 (target['launch_id'],)).fetchone():reasons.append('bootstrap_required')
             if target['coverage_start_at'] is None or target['coverage_start_at']>target['tracking_start_at']:reasons.append('service_started_late')
             if target['coverage_end_at'] is None or target['coverage_end_at']<end:reasons.append('coverage_not_confirmed')
             quality='partial' if reasons else 'complete'

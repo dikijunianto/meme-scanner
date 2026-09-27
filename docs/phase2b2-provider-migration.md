@@ -131,6 +131,58 @@ both DB integrity checks `ok`, main PID/restart count unchanged, and Phase 1.6
 and Phase 2A healthy. Fallback WSS remains test-verified unless natural failover
 occurs. Only then report `READY_24H_SOAK`. No Phase 2C or trading change.
 
+## Missing-cursor proof bootstrap (legacy route)
+
+A target with no `recovery:<launch>:<filter>` cursor has unknown HTTP completeness.
+New curve targets record `flow_bootstrap=required` at activation; a graduation
+adds separate V4 and hook requirements. The initial/long cohort flag is fixed
+from the canonical outcome target at discovery and does not reset a cursor.
+The worker may persist WSS events while required proof is pending, but a
+bootstrap gap and feature check prevent a complete feature claim. A short
+normal recovery commits a previously missing cursor only after its entire
+activation-to-head range succeeds. Existing cursors retain the 100-block
+startup bound. Expired targets retain their bootstrap state and gap evidence.
+
+`scripts/flow_bootstrap_missing_cursors.py` runs with both services active,
+the split disabled, and Validation HTTP as its only bootstrap RPC. It reuses
+the canonical shadow parser, 2,000-block adaptive ranges, per-attempt shared
+accounting, 12/minute and 1,000/day limits, 0.5 HTTP envelopes/second, and
+the 50-getLogs-call reserve. Its stage ledger commits each successful range,
+including empty ranges, before any normal cursor. Failure leaves that cursor
+unchanged. Re-running an incomplete stage starts at the first unverified block.
+
+For the five targets discovered while the old daily getLogs allowance was
+exhausted, retain their IDs explicitly even if they have since expired:
+
+```sh
+cd /opt/meme-scanner
+.venv/bin/python scripts/flow_bootstrap_missing_cursors.py --mode bootstrap \
+  --include-expired-ids 256799,256888,256894,256895,256918
+```
+
+The tool freezes one Validation head. A curve starts at its launch block; V4
+and hook filters start at the proven graduation block. An expired target ends
+at the first canonical main-scanner launch block timestamped after its tracking
+window, avoiding hours of irrelevant history. The ledger and gap rows remain
+after completion. No service restarts are part of this command.
+
+For moving-head catch-up, run successive numbered stages while flow remains
+online: `--mode tail --stage cursor_tail_1`, then
+`cursor_tail_2`, and so on. A pending stage must be resumed with the **same**
+name. Each new stage captures a fresh common head and includes current active
+filters, including any newly required bootstrap. Run `--mode preflight`
+afterward. Its `safe_now` flag requires all active filters to have cursors,
+the actual normal recovery plan to fit 100 blocks, and no cursor more than
+60 blocks behind the observed head. A later restart still needs a fresh,
+immediate preflight, unchanged main PID, clean tested source, healthy DBs,
+readable protected config, and remaining recovery budget. If any check fails,
+leave the old Alchemy flow process running.
+
+Rollback before a flow restart is simply to stop the operator tool: proof
+rows, raw events, and unresolved bootstrap gaps remain durable and resumable.
+Do not delete rows or set a cursor to an unproved head. The provider cutover
+and Phase 2C remain separate decisions.
+
 ## Flow-only emergency rollback
 
 If cutover fails, stop only `meme-scanner-flow.service`; restore the protected

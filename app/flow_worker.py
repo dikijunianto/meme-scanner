@@ -244,6 +244,13 @@ class FlowWorker:
 
     async def recover_plans(self,plans):
         for t,kind,query,key,first,last in plans:
+            bootstrapping=self.db.state(key) is None
+            if bootstrapping:
+                g=json.loads(t['graduation_json']) if t['graduation_json'] else None
+                base=g['block_number'] if g and kind!='curve' else t['launch_block']
+                if first!=base:raise RpcError('Bootstrap must begin at filter activation')
+                self.db.require_bootstrap(t,kind,base)
+                with self.db.conn:self.db.conn.execute("UPDATE flow_bootstrap SET status='in_progress' WHERE launch_id=? AND kind=? AND status='required'",(t['launch_id'],kind))
             g=json.loads(t['graduation_json']) if t['graduation_json'] else None
             boundary=(g['block_number'],g['log_index']) if g else None
             current=first;span=RECOVERY_CHUNK_BLOCKS
@@ -271,11 +278,12 @@ class FlowWorker:
                     if not item.get('blockTimestamp'):
                         item['blockTimestamp']=hex(await self.header(int(item['blockNumber'],16)))
                     if self.ingest(t,item) is False:raise RpcError('Recovery event rejected')
-                # Store the cursor after every event in this inclusive chunk committed.
-                self.db.set_state(key,end)
+                # A missing cursor is all-or-nothing; partial proof cannot claim completeness.
+                if not bootstrapping:self.db.set_state(key,end)
                 self.db.count('flow_recovery_blocks',end-current+1)
                 current=end+1
                 self.drain()
+            if bootstrapping:self.db.complete_bootstrap(t['launch_id'],kind,last)
 
     def pressure(self):
         # Degrade flow first, leaving the base service's settings untouched.
@@ -333,6 +341,13 @@ class FlowWorker:
             return {'v4':{'address':g['pool_manager_address'],'topics':[SWAP,g['pool_id']]},
                     'hook':{'address':g['hooks'],'topics':[HOOK,g['pool_id']]}}
         return {'curve':{'address':t['curve_address'],'topics':[[BUY,SELL]]}}
+
+    def ensure_bootstrap_state(self,t):
+        graduation=json.loads(t['graduation_json']) if t['graduation_json'] else None
+        for kind in self.filters(t):
+            base=graduation['block_number'] if graduation and kind!='curve' else t['launch_block']
+            self.db.require_bootstrap(t,kind,base)
+        if graduation:self.db.require_bootstrap(t,'curve',t['launch_block'])
 
     def recovery_fingerprint(self,t):
         return tuple((kind,self.db.state(f'recovery:{t["launch_id"]}:{kind}')) for kind in sorted(self.filters(t)))
@@ -433,6 +448,7 @@ class FlowWorker:
               VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?,?)''',
               (row['id'],row['token_address'],row['quote_asset_address'],row['curve_address'],row['creator_address'],decimals,
                row['cohort_long'],start,end,row['block_number'],row['log_index'],now,now))
+            self.ensure_bootstrap_state(self.db.target(row['id']))
             if start<float(self.db.state('phase2b_coverage_start_at')):
                 self.db.gap(row['id'],start,float(self.db.state('phase2b_coverage_start_at')),'service_started_late')
             self.db.count('flow_targets_created')
@@ -464,6 +480,7 @@ class FlowWorker:
                 g=dict(grad)
                 with self.db.conn:self.db.conn.execute("UPDATE flow_tracking_targets SET graduation_json=?,pool_id=?,current_phase='v4' WHERE launch_id=?",(json.dumps(g),g['pool_id'],t['launch_id']))
                 t=self.db.target(t['launch_id'])
+            self.ensure_bootstrap_state(t)
             try:new=await self.subscribe(t)
             except FlowBudget:
                 self.db.gap(t['launch_id'],t['coverage_end_at'] or t['tracking_start_at'],now,'provider_budget')
@@ -506,8 +523,10 @@ class FlowWorker:
                     self.recovery_gap(t,exc.first_block)
                     if exc.category=='UNRECOVERABLE_GAP':
                         self.blocked_recovery[launch]=fingerprint
-                        self.db.set_state('recovery_rejection_scope',exc.scope)
-                        self.db.set_state('service_status','unrecoverable_gap')
+                        missing=any(self.db.state(f'recovery:{launch}:{kind}') is None for kind in self.filters(t))
+                        scope='bootstrap_required' if missing else exc.scope
+                        self.db.set_state('recovery_rejection_scope',scope)
+                        self.db.set_state('service_status','bootstrap_required' if missing else 'unrecoverable_gap')
                         log.warning('Flow recovery blocked budget_scope=%s used=%s limit=%s category=%s',
                                     exc.scope,exc.used,exc.limit,exc.category)
                         continue
@@ -532,7 +551,7 @@ class FlowWorker:
                 self.pending_recovery.discard(launch);self.recovery_heads.pop(launch,None)
                 self.blocked_recovery.pop(launch,None);self.dirty.add(launch)
         if not self.pending_recovery and self.db.state('service_status') in (
-                'temporary_budget_wait','daily_budget_exhausted','unrecoverable_gap','provider_error'):
+                'temporary_budget_wait','daily_budget_exhausted','unrecoverable_gap','bootstrap_required','provider_error'):
             self.db.set_state('service_status','connected')
         status=self.db.state('service_status')
         self.db.set_state('recovery_state','healthy' if status=='connected' else status)
