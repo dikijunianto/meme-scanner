@@ -66,8 +66,11 @@ def screen(values, seed):
         out['note'] = 'tiny_sample_no_correlation'
         return out
     xs, ys = zip(*pairs)
+    if len(set(xs)) < 2:
+        out['note'] = 'constant_feature_no_correlation'
+        return out
     zero_count = sum(x == 0 for x in xs)
-    if zero_count and min(zero_count, len(xs) - zero_count) < 10:
+    if len(set(xs)) == 2 and zero_count and min(zero_count, len(xs) - zero_count) < 10:
         out['note'] = 'sparse_feature_no_correlation'
         return out
     out['spearman'] = spearman(xs, ys)

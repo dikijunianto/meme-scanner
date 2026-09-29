@@ -20,6 +20,7 @@ class DatasetAuditTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(gc.collect)
         self.main = Path(self.tmp.name) / 'main.db'
         self.flow = Path(self.tmp.name) / 'flow.db'
         with sqlite3.connect(self.main) as db:
@@ -99,8 +100,10 @@ class DatasetAuditTests(unittest.TestCase):
 
     def test_alignment_eras_and_deterministic_summary(self):
         self.assertIn('spearman', audit.screen([(float(i), float(i)) for i in range(1, 31)], 1))
+        self.assertIn('spearman', audit.screen([(0.0 if i < 5 else float(i), float(i))
+                                                for i in range(1, 31)], 1))
         self.assertEqual(audit.screen([(0.0, float(i)) for i in range(30)], 1)['note'],
-                         'sparse_feature_no_correlation')
+                         'constant_feature_no_correlation')
         for window, horizon in ((300, 300), (900, 300), (60, 123)):
             with audit.open_readonly(self.main, self.flow) as db:
                 with self.assertRaises(ValueError):
