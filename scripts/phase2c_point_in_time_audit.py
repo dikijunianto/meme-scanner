@@ -3,6 +3,7 @@
 Run as ``python -m scripts.phase2c_point_in_time_audit``. No RPC imports.
 """
 import argparse
+import hashlib
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 import json
@@ -207,12 +208,12 @@ def summarize_rows(rows, seed):
                                   for i,key in enumerate(base.PREDICTORS)}}
 
 
-def chronological_readiness(rows):
+def chronological_readiness(rows, ledger=False):
     policy = {'minimum_point_in_time_safe_split_era_n':600,
               'minimum_span_days':60,'chronological_train_validation_holdout':'60/20/20',
               'minimum_holdout_n':120,'minimum_below_one_and_above_one_per_slice':20,
               'required_feature_proof':'immutable first materialization and completeness time <= prediction time'}
-    eligible = sorted((r for r in rows if r['pit']['usable_at_exact_cutoff']=='YES'),
+    eligible = sorted((r for r in rows if ledger or r['pit']['usable_at_exact_cutoff']=='YES'),
                       key=lambda r:r['tracking_start_at'])
     n = len(eligible)
     span = ((eligible[-1]['tracking_start_at']-eligible[0]['tracking_start_at'])/86400
@@ -292,6 +293,80 @@ def pair_audit(db, windows, as_of, legacy_end, split_start):
     return output,sensitivity,model_gate
 
 
+def ledger_audit(db,as_of):
+    """Only prospective, immutable first-eligible versions can enter model counts."""
+    if not db.execute("SELECT 1 FROM flow.sqlite_master WHERE name='flow_feature_ledger_start'").fetchone():
+        return {'boundary':None,'launches':0,'complete_windows':0,'first_eligible_versions':0,
+                'usable_by_pair':{},'days_of_history':0,'model_readiness':chronological_readiness([],True)}
+    start=db.execute('SELECT * FROM flow.flow_feature_ledger_start WHERE id=1').fetchone()
+    if not start or start['start_at']>as_of:
+        return {'boundary':None,'launches':0,'complete_windows':0,'first_eligible_versions':0,
+                'usable_by_pair':{},'days_of_history':0,'model_readiness':chronological_readiness([],True)}
+    versions={}
+    for r in db.execute('''SELECT v.*,t.tracking_start_at FROM flow.flow_feature_versions v
+        JOIN flow.flow_tracking_targets t USING(launch_id)
+        WHERE t.tracking_start_at>=? AND v.materialized_at<=? AND v.feature_schema_version='v1'
+        ORDER BY v.launch_id,v.window_seconds,v.version_number''',(start['start_at'],as_of)):
+        key=(r['launch_id'],r['window_seconds'])
+        if key not in versions and r['coverage_quality']=='complete' and r['model_eligible_at'] is not None and r['model_eligible_at']<=as_of:
+            if hashlib.sha256(r['payload'].encode()).hexdigest()!=r['payload_sha256']:
+                raise ValueError('Immutable feature payload hash mismatch')
+            versions[key]=dict(r)
+    invalidated={(r['launch_id'],r['window_seconds']) for r in db.execute('''
+        SELECT launch_id,window_seconds,version_number FROM flow.flow_feature_versions
+        WHERE materialized_at<=? AND (write_reason LIKE 'reorg%' OR coverage_reason LIKE '%reorg%')''',(as_of,))
+        if (r['launch_id'],r['window_seconds']) in versions and
+        r['version_number']>versions[(r['launch_id'],r['window_seconds'])]['version_number']}
+    pair_counts={};model_rows=[]
+    for window in base.WINDOWS:
+        for horizon in base.HORIZONS:
+            if window>=horizon:continue
+            n=0
+            for r in db.execute('''SELECT t.launch_id,t.tracking_start_at,t.token_address target_token,
+                t.quote_asset_address target_quote,l.token_address launch_token,
+                l.quote_asset_address launch_quote,ot.due_at,
+                y.observed_at label_at,y.data_quality label_quality,y.price_quote label_price,
+                y.quote_asset_address label_quote,b.price_quote baseline_price,
+                b.data_quality baseline_quality,b.quote_asset_address baseline_quote
+                FROM flow.flow_tracking_targets t JOIN launches l ON l.id=t.launch_id
+                JOIN outcome_targets ot
+                  ON ot.launch_id=t.launch_id AND ot.target_age_seconds=?
+                LEFT JOIN market_snapshots y ON y.launch_id=t.launch_id AND y.target_age_seconds=?
+                LEFT JOIN market_snapshots b ON b.launch_id=t.launch_id AND b.target_age_seconds=0
+                WHERE t.tracking_start_at>=? AND l.is_stock_quote=1
+                  AND ot.sampling_group!='not_sampled' ''',
+                (horizon,horizon,start['start_at'])):
+                key=(r['launch_id'],window);v=versions.get(key)
+                if not v or key in invalidated or not r['label_at'] or r['label_quality']!='verified' or r['baseline_quality']!='verified':
+                    continue
+                if (r['target_token'].lower()!=r['launch_token'].lower() or
+                    r['target_quote'].lower()!=r['launch_quote'].lower() or
+                    r['target_quote'].lower()!=r['label_quote'].lower() or
+                    r['target_quote'].lower()!=r['baseline_quote'].lower()):
+                    continue
+                label_at=base.stamp(r['label_at'])
+                if not (v['model_eligible_at']<label_at<=as_of and base.stamp(r['due_at'])<=as_of):
+                    continue
+                p0,p1=base.positive(r['baseline_price']),base.positive(r['label_price'])
+                if p0 is None or p1 is None:continue
+                n+=1
+                if window==60 and horizon==86400:
+                    model_rows.append({'tracking_start_at':r['tracking_start_at'],
+                                       'label_relation':(p1>p0)-(p1<p0)})
+            pair_counts[f'{window}s_to_{horizon}s']=n
+    launches=db.execute('SELECT count(*) FROM flow.flow_tracking_targets WHERE tracking_start_at>=? AND tracking_start_at<=?',
+                        (start['start_at'],as_of)).fetchone()[0]
+    complete=db.execute('''SELECT count(DISTINCT v.launch_id || ':' || v.window_seconds) FROM flow.flow_feature_versions v
+        JOIN flow.flow_tracking_targets t USING(launch_id)
+        WHERE t.tracking_start_at>=? AND v.coverage_quality='complete' AND v.materialized_at<=?''',
+        (start['start_at'],as_of)).fetchone()[0]
+    return {'boundary':{'start_utc':utc(start['start_at']),'start_block':start['start_block'],
+                        'deploy_revision':start['deploy_revision']},'launches':launches,
+            'complete_windows':complete,'first_eligible_versions':len(versions),
+            'usable_by_pair':pair_counts,'days_of_history':(as_of-start['start_at'])/86400,
+            'model_readiness':chronological_readiness(model_rows,True)}
+
+
 def audit(db, as_of, session_id=base.SESSION):
     row = db.execute('SELECT payload,status FROM flow.flow_cutover_sessions WHERE id=?',(session_id,)).fetchone()
     if not row or row['status']!='COMPLETE':
@@ -302,6 +377,7 @@ def audit(db, as_of, session_id=base.SESSION):
         raise ValueError('Invalid quality-era boundary')
     windows,coverage = window_rows(db,as_of,legacy_end,split_start)
     pairs,sensitivity,model_gate = pair_audit(db,windows,as_of,legacy_end,split_start)
+    ledger=ledger_audit(db,as_of)
     split_targets = db.execute('''SELECT count(*) n,sum(cohort_initial) initial_n,sum(cohort_long) long_n
         FROM flow.flow_tracking_targets WHERE tracking_start_at>=? AND tracking_start_at<=?''',
         (split_start,as_of)).fetchone()
@@ -312,15 +388,17 @@ def audit(db, as_of, session_id=base.SESSION):
     return {'as_of_utc':utc(as_of),'session_id':session_id,
             'era_boundary':{'legacy_end_utc':utc(legacy_end),'split_start_utc':utc(split_start),
                             'split_start_block':session['H_live']},
-            'point_in_time_rule':'feature_available_at <= prediction_at AND completeness proof <= prediction_at',
+            'point_in_time_rule':'first eligible immutable version with model_eligible_at < label_observed_at',
             'historical_first_availability':'UNKNOWN: feature versions and coverage proof times are not retained',
             'candidate_classification':{key:'RECONSTRUCTABLE_ONLY' for key in base.PREDICTORS},
             'split_tracked':{'n':split_targets['n'],'initial':split_targets['initial_n'] or 0,
                              'long':split_targets['long_n'] or 0},
             'window_availability':coverage,'pairs_by_era':pairs,
+            'point_in_time_ledger_era':ledger,
             'legacy_60s_to_6h_sensitivity':sensitivity,
             'recipient_semantics':dict(recipient),
-            'model_readiness':model_gate,
+            'model_readiness':ledger['model_readiness'],
+            'pre_ledger_reconstructed_readiness':model_gate,
             'pooled_inference_permitted':False,
             'limitations':['First raw-event arrival is retained, but later corrections/removals have no version timestamp.',
                            'flow_features.finalized_at is overwritten and in normal split worker is stored as wall clock minus three seconds.',

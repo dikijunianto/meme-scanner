@@ -1,5 +1,6 @@
 """Isolated flow storage, event semantics and deterministic local features."""
 import json
+import hashlib
 import sqlite3
 import time
 from collections import defaultdict
@@ -12,6 +13,10 @@ from eth_utils import keccak
 from app.models import hash32
 
 WINDOWS = (30, 60, 300, 900, 3600)
+FEATURE_SCHEMA_VERSION = 'v1'
+PIT_METRICS = ('curve_buy_count', 'curve_sell_count', 'total_directional_event_count',
+               'v4_core_swap_count', 'unique_buy_recipients', 'top1_buy_recipient_token_share',
+               'curve_tokens_bought')
 BUY = '0xec36bf571f136799e8dc0b0b8bea4b04d8bd3d43de838aab0d5fc21d4cbfc455'
 SELL = '0x8113d738abdcb6b38357e9d53a54a7157861a09031b453651f0fe7fe151f59df'
 SWAP = '0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f'
@@ -176,10 +181,87 @@ class FlowDB:
           stage TEXT NOT NULL,launch_id INTEGER NOT NULL,kind TEXT NOT NULL,
           query_json TEXT NOT NULL,upper_at REAL NOT NULL,
           PRIMARY KEY(stage,launch_id,kind));
+        CREATE TABLE IF NOT EXISTS flow_feature_ledger_start(
+          id INTEGER PRIMARY KEY CHECK(id=1),start_at REAL NOT NULL,start_block INTEGER,
+          deploy_revision TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS flow_feature_versions(
+          launch_id INTEGER NOT NULL,window_seconds INTEGER NOT NULL,version_number INTEGER NOT NULL,
+          feature_schema_version TEXT NOT NULL,feature_cutoff_at REAL NOT NULL,
+          materialized_at REAL NOT NULL,completeness_proved_at REAL,model_eligible_at REAL,
+          coverage_quality TEXT NOT NULL,coverage_reason TEXT NOT NULL,
+          payload TEXT NOT NULL,payload_sha256 TEXT NOT NULL,semantic_sha256 TEXT NOT NULL,
+          write_reason TEXT NOT NULL,source_revision TEXT NOT NULL,proof_json TEXT NOT NULL,
+          created_at REAL NOT NULL,
+          PRIMARY KEY(launch_id,window_seconds,version_number));
+        CREATE INDEX IF NOT EXISTS flow_feature_versions_eligible
+          ON flow_feature_versions(model_eligible_at,feature_schema_version)
+          WHERE model_eligible_at IS NOT NULL;
+        CREATE TRIGGER IF NOT EXISTS flow_feature_versions_no_update BEFORE UPDATE ON flow_feature_versions
+          BEGIN SELECT RAISE(ABORT,'feature versions are immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS flow_feature_versions_no_delete BEFORE DELETE ON flow_feature_versions
+          BEGIN SELECT RAISE(ABORT,'feature versions are immutable'); END;
         ''')
         self.conn.commit()
         from app.flow_cutover import schema as cutover_schema
         cutover_schema(self)
+
+    def activate_pit_ledger(self,revision,block=None,now=None):
+        """Start prospective collection once, after the new worker is connected."""
+        if len(revision)!=40 or any(c not in '0123456789abcdef' for c in revision):
+            raise ValueError('Full source revision required')
+        at=time.time() if now is None else now
+        with self.conn:
+            self.conn.execute('INSERT OR IGNORE INTO flow_feature_ledger_start VALUES(1,?,?,?)',
+                              (at,block,revision))
+
+    def _append_feature_version(self,target,row,reason):
+        start=self.conn.execute('SELECT * FROM flow_feature_ledger_start WHERE id=1').fetchone()
+        if not start or target['tracking_start_at']<start['start_at']:
+            return
+        launch,window=target['launch_id'],row['window_seconds']
+        metrics=json.loads(row['metrics'])
+        payload=json.dumps({k:metrics.get(k) for k in PIT_METRICS},sort_keys=True,separators=(',',':'))
+        payload_hash=hashlib.sha256(payload.encode()).hexdigest()
+        graduation=json.loads(target['graduation_json']) if target['graduation_json'] else None
+        kinds=('curve','v4','hook') if graduation and stamp(graduation['block_timestamp'])<=row['feature_cutoff_at'] else ('curve',)
+        proof=[]
+        for kind in kinds:
+            bootstrap=self.conn.execute('SELECT status,completed_head,completed_at FROM flow_bootstrap WHERE launch_id=? AND kind=?',
+                                        (launch,kind)).fetchone()
+            cursor=self.state(f'recovery:{launch}:{kind}')
+            proof.append({'kind':kind,'bootstrap_status':bootstrap['status'] if bootstrap else None,
+                          'completed_head':bootstrap['completed_head'] if bootstrap else None,
+                          'completed_at':bootstrap['completed_at'] if bootstrap else None,
+                          'cursor':int(cursor) if cursor is not None else None})
+        ready=(row['coverage_quality']=='complete' and
+               all(p['bootstrap_status']=='complete' and p['cursor'] is not None for p in proof))
+        semantic=json.dumps((FEATURE_SCHEMA_VERSION,payload_hash,row['coverage_quality'],
+                             row['coverage_reason'],ready),separators=(',',':'))
+        semantic_hash=hashlib.sha256(semantic.encode()).hexdigest()
+        prior=self.conn.execute('''SELECT version_number,semantic_sha256,payload_sha256,coverage_quality,
+                                        coverage_reason,model_eligible_at
+                                 FROM flow_feature_versions
+                                 WHERE launch_id=? AND window_seconds=? ORDER BY version_number DESC LIMIT 1''',
+                                (launch,window)).fetchone()
+        if prior and prior['semantic_sha256']==semantic_hash:
+            return
+        if reason=='rebuild':
+            reason=('first_materialization' if not prior else
+                    'payload_changed_rebuild' if prior['payload_sha256']!=payload_hash else
+                    'coverage_changed_rebuild' if prior['coverage_quality']!=row['coverage_quality'] else
+                    'coverage_reason_changed_rebuild' if prior['coverage_reason']!=row['coverage_reason'] else
+                    'proof_state_changed_rebuild' if (prior['model_eligible_at'] is None)!=ready else
+                    'rebuild')
+        at=time.time()
+        proved=at if ready else None
+        evidence={'window_end_at':row['feature_cutoff_at'],'coverage_start_at':row['coverage_start_at'],
+                  'coverage_end_at':row['coverage_end_at'],'filters':proof,
+                  'proof_source':'existing_bootstrap_and_recovery_cursors' if ready else 'incomplete_or_unknown'}
+        self.conn.execute('''INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                          (launch,window,1+(prior['version_number'] if prior else 0),FEATURE_SCHEMA_VERSION,
+                           row['feature_cutoff_at'],at,proved,max(row['feature_cutoff_at'],at,proved) if ready else None,
+                           row['coverage_quality'],row['coverage_reason'],payload,payload_hash,semantic_hash,
+                           reason,start['deploy_revision'],json.dumps(evidence,sort_keys=True,separators=(',',':')),at))
 
     def require_bootstrap(self,target,kind,safe_start):
         """Make unknown completeness durable before a target can claim coverage."""
@@ -198,6 +280,8 @@ class FlowDB:
                               (launch,at,at,f'bootstrap_required:{kind}',safe_start))
             self.conn.execute("UPDATE flow_features SET coverage_quality='partial',coverage_reason=? WHERE launch_id=?",
                               (f'bootstrap_required:{kind}',launch))
+            for feature in self.conn.execute('SELECT * FROM flow_features WHERE launch_id=?',(launch,)):
+                self._append_feature_version(target,feature,f'bootstrap_required:{kind}')
         return True
 
     def complete_bootstrap(self,launch,kind,head):
@@ -236,6 +320,10 @@ class FlowDB:
             self.conn.execute('INSERT INTO flow_gaps(launch_id,start_at,end_at,reason,first_block) VALUES(?,?,?,?,?)',(launch_id,start,max(start,end),reason,first_block))
             # Persist invalidation atomically; a crash must not leave stale complete rows.
             self.conn.execute("UPDATE flow_features SET coverage_quality='partial',coverage_reason=? WHERE launch_id=? AND feature_cutoff_at>=?",(reason,launch_id,start))
+            target=self.target(launch_id)
+            if target:
+                for feature in self.conn.execute('SELECT * FROM flow_features WHERE launch_id=? AND feature_cutoff_at>=?',(launch_id,start)):
+                    self._append_feature_version(target,feature,reason)
 
     def target(self,launch_id):
         r=self.conn.execute('SELECT * FROM flow_tracking_targets WHERE launch_id=?',(launch_id,)).fetchone()
@@ -307,13 +395,17 @@ class FlowDB:
             if reasons and not rows:quality='unavailable'
             metrics=features(self,target,rows,end)
             if quality=='unavailable':metrics={k:None for k in metrics}
-            with self.conn:self.conn.execute('''INSERT INTO flow_features VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            with self.conn:
+                self.conn.execute('''INSERT INTO flow_features VALUES(?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(launch_id,window_seconds) DO UPDATE SET finalized_at=excluded.finalized_at,
               coverage_start_at=excluded.coverage_start_at,coverage_end_at=excluded.coverage_end_at,
               coverage_quality=excluded.coverage_quality,coverage_reason=excluded.coverage_reason,metrics=excluded.metrics''',
               (target['launch_id'],window,target['token_address'],target['quote_asset_address'],end,now,
                target['coverage_start_at'],min(end,target['coverage_end_at']) if target['coverage_end_at'] is not None else None,
                quality,','.join(sorted(set(reasons))) or 'complete',json.dumps(metrics)))
+                feature=self.conn.execute('SELECT * FROM flow_features WHERE launch_id=? AND window_seconds=?',
+                                          (target['launch_id'],window)).fetchone()
+                self._append_feature_version(target,feature,'rebuild')
 
 
 def features(db,target,rows,cutoff):

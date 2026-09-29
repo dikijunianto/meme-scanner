@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
 import time
 
 from dotenv import dotenv_values
@@ -594,6 +595,11 @@ class FlowWorker:
         switch_blocked=bool(self.settings.split_enabled and
                             (provider_switch.pending(self.db,identity) or provider_switch.blocked(self.db,identity)))
         pending=bool(value and value['state'] in PENDING|{'FAILED'}) or switch_blocked
+        if connected and not pending and self.settings.split_enabled and (ROOT/'.git').exists() and not self.db.conn.execute(
+                'SELECT 1 FROM flow_feature_ledger_start WHERE id=1').fetchone():
+            revision=subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip()
+            self.db.activate_pit_ledger(revision,self.latest_block or
+                                        int(self.db.state('last_connected_block',0)) or None)
         if not connected:
             with self.db.conn:self.db.conn.execute("UPDATE flow_tracking_targets SET status='partial',completed_at=?,updated_at=? WHERE tracking_end_at+10<? AND status NOT IN ('completed','partial')",(now,now,now))
         if connected and not pending:

@@ -1,4 +1,5 @@
 import gc
+import hashlib
 import io
 import json
 from contextlib import redirect_stderr
@@ -142,6 +143,39 @@ class PointInTimeTests(unittest.TestCase):
         self.assertEqual(pit.label_distribution([{'multiple':1.0,'label_relation':-1,
                                                    'reserve_state':'same_curve_reserves'}])
                          ['fraction_exactly_one'],0)
+
+    def test_ledger_first_eligible_strictly_precedes_label(self):
+        payload=json.dumps({'curve_buy_count':1},sort_keys=True,separators=(',',':'))
+        with sqlite3.connect(self.flow) as db:
+            db.executescript('''CREATE TABLE flow_feature_ledger_start(id INTEGER,start_at REAL,start_block INTEGER,deploy_revision TEXT);
+                CREATE TABLE flow_feature_versions(launch_id INTEGER,window_seconds INTEGER,version_number INTEGER,
+                  feature_schema_version TEXT,materialized_at REAL,coverage_quality TEXT,model_eligible_at REAL,
+                  payload TEXT,payload_sha256 TEXT,write_reason TEXT,coverage_reason TEXT);''')
+            db.execute('INSERT INTO flow_feature_ledger_start VALUES(1,1100,1234,?)',('a'*40,))
+            db.execute('INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                       (2,60,1,'v1',1264,'partial',None,payload,hashlib.sha256(payload.encode()).hexdigest(),'initial','bootstrap_required'))
+            db.execute('INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                       (2,60,2,'v1',1265,'complete',1265,payload,hashlib.sha256(payload.encode()).hexdigest(),'rebuild','complete'))
+            db.execute('INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                       (2,60,3,'v1',1266,'complete',1266,payload,hashlib.sha256(payload.encode()).hexdigest(),'rebuild','complete'))
+        with pit.base.open_readonly(self.main,self.flow) as db:
+            result=pit.ledger_audit(db,30000)
+        self.assertEqual(result['first_eligible_versions'],1)
+        self.assertEqual(result['usable_by_pair']['60s_to_21600s'],1)
+        self.assertEqual(result['launches'],1)
+        with sqlite3.connect(self.flow) as db:
+            db.execute('UPDATE flow_feature_versions SET model_eligible_at=? WHERE launch_id=2 AND version_number=2',
+                       (22801,))
+            db.execute('UPDATE flow_feature_versions SET model_eligible_at=? WHERE launch_id=2 AND version_number=3',
+                       (22802,))
+        with pit.base.open_readonly(self.main,self.flow) as db:
+            result=pit.ledger_audit(db,30000)
+        self.assertEqual(result['usable_by_pair']['60s_to_21600s'],0)
+        with sqlite3.connect(self.flow) as db:
+            db.execute("UPDATE flow_feature_versions SET feature_schema_version='v2' WHERE launch_id=2")
+        with pit.base.open_readonly(self.main,self.flow) as db:
+            result=pit.ledger_audit(db,30000)
+        self.assertEqual(result['first_eligible_versions'],0)
 
 
 if __name__=='__main__':
