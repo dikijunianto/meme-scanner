@@ -1,0 +1,4555 @@
+{
+  "analytical_grain": "launch_id x feature_window_seconds x label_horizon_seconds",
+  "as_of_utc": "2026-09-28T18:43:35+00:00",
+  "chronological_split": {
+    "primary_pair": "60s_to_24h",
+    "ready_for_train_validation_holdout": false,
+    "rule": "Require at least 300 split-era rows over 30 days; no random shuffle.",
+    "split_era_launch_span_days": 0,
+    "split_era_n": 0
+  },
+  "counts": {
+    "graduated_by_as_of_diagnostic": 14,
+    "initial_cohort": 687,
+    "long_cohort": 342,
+    "phase2a_phase2b_overlap": 687,
+    "phase2a_sampled_launches": 4190,
+    "phase2b_tracked_launches": 687,
+    "stock_paired_launches": 54681
+  },
+  "era_feature_coverage": [
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 437,
+      "quality": "complete",
+      "window_seconds": 30
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 82,
+      "quality": "partial",
+      "window_seconds": 30
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 107,
+      "quality": "unavailable",
+      "window_seconds": 30
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 436,
+      "quality": "complete",
+      "window_seconds": 60
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 95,
+      "quality": "partial",
+      "window_seconds": 60
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 95,
+      "quality": "unavailable",
+      "window_seconds": 60
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 433,
+      "quality": "complete",
+      "window_seconds": 300
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 116,
+      "quality": "partial",
+      "window_seconds": 300
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 77,
+      "quality": "unavailable",
+      "window_seconds": 300
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 430,
+      "quality": "complete",
+      "window_seconds": 900
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 122,
+      "quality": "partial",
+      "window_seconds": 900
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 74,
+      "quality": "unavailable",
+      "window_seconds": 900
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 216,
+      "quality": "complete",
+      "window_seconds": 3600
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 69,
+      "quality": "partial",
+      "window_seconds": 3600
+    },
+    {
+      "era": "LEGACY_FLOW_ERA",
+      "n": 33,
+      "quality": "unavailable",
+      "window_seconds": 3600
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 59,
+      "quality": "complete",
+      "window_seconds": 30
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 1,
+      "quality": "partial",
+      "window_seconds": 30
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 1,
+      "quality": "unavailable",
+      "window_seconds": 30
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 59,
+      "quality": "complete",
+      "window_seconds": 60
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 1,
+      "quality": "partial",
+      "window_seconds": 60
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 1,
+      "quality": "unavailable",
+      "window_seconds": 60
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 59,
+      "quality": "complete",
+      "window_seconds": 300
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 1,
+      "quality": "partial",
+      "window_seconds": 300
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 1,
+      "quality": "unavailable",
+      "window_seconds": 300
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 59,
+      "quality": "complete",
+      "window_seconds": 900
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 1,
+      "quality": "partial",
+      "window_seconds": 900
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 1,
+      "quality": "unavailable",
+      "window_seconds": 900
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 21,
+      "quality": "complete",
+      "window_seconds": 3600
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 1,
+      "quality": "partial",
+      "window_seconds": 3600
+    },
+    {
+      "era": "SPLIT_FLOW_ERA",
+      "n": 1,
+      "quality": "unavailable",
+      "window_seconds": 3600
+    },
+    {
+      "era": "TRANSITION_ERA",
+      "n": 1,
+      "quality": "complete",
+      "window_seconds": 3600
+    }
+  ],
+  "feature_coverage": [
+    {
+      "coverage_quality": "complete",
+      "n": 496,
+      "window_seconds": 30
+    },
+    {
+      "coverage_quality": "partial",
+      "n": 83,
+      "window_seconds": 30
+    },
+    {
+      "coverage_quality": "unavailable",
+      "n": 108,
+      "window_seconds": 30
+    },
+    {
+      "coverage_quality": "complete",
+      "n": 495,
+      "window_seconds": 60
+    },
+    {
+      "coverage_quality": "partial",
+      "n": 96,
+      "window_seconds": 60
+    },
+    {
+      "coverage_quality": "unavailable",
+      "n": 96,
+      "window_seconds": 60
+    },
+    {
+      "coverage_quality": "complete",
+      "n": 492,
+      "window_seconds": 300
+    },
+    {
+      "coverage_quality": "partial",
+      "n": 117,
+      "window_seconds": 300
+    },
+    {
+      "coverage_quality": "unavailable",
+      "n": 78,
+      "window_seconds": 300
+    },
+    {
+      "coverage_quality": "complete",
+      "n": 489,
+      "window_seconds": 900
+    },
+    {
+      "coverage_quality": "partial",
+      "n": 123,
+      "window_seconds": 900
+    },
+    {
+      "coverage_quality": "unavailable",
+      "n": 75,
+      "window_seconds": 900
+    },
+    {
+      "coverage_quality": "complete",
+      "n": 238,
+      "window_seconds": 3600
+    },
+    {
+      "coverage_quality": "partial",
+      "n": 70,
+      "window_seconds": 3600
+    },
+    {
+      "coverage_quality": "unavailable",
+      "n": 34,
+      "window_seconds": 3600
+    }
+  ],
+  "interpretation": [
+    "retrospective event-time features, not proven available live at exact cutoff",
+    "T0-to-H marginal price and FDV multiples are not executable returns",
+    "future market phase and final target status are diagnostics, never predictors"
+  ],
+  "pairs": [
+    {
+      "coverage": {
+        "complete": 496,
+        "partial": 83,
+        "unavailable": 108
+      },
+      "descriptives_by_cohort": {},
+      "descriptives_by_era": {},
+      "descriptives_by_state_at_cutoff": {},
+      "exclusive_exclusions": {
+        "feature_finalized_after_label": 496,
+        "flow_partial": 83,
+        "flow_unavailable": 108
+      },
+      "feature_cutoff_seconds": 30,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "curve_sell_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "top1_buy_recipient_token_share": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "total_directional_event_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "unique_buy_recipients": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": null,
+        "n": 0,
+        "p10": null,
+        "p25": null,
+        "p75": null,
+        "p90": null
+      },
+      "label_horizon_seconds": 300,
+      "label_price_multiple_t0_to_h": {
+        "median": null,
+        "n": 0,
+        "p10": null,
+        "p25": null,
+        "p75": null,
+        "p90": null
+      },
+      "mature_denominator": 687,
+      "minimum_observed_separation_seconds": null,
+      "minimum_scheduled_separation_seconds": 270,
+      "split_era_launch_span_days": null,
+      "usable_by_cohort": {},
+      "usable_by_era": {},
+      "usable_by_label_market_phase": {},
+      "usable_by_state_at_cutoff": {},
+      "usable_n": 0
+    },
+    {
+      "coverage": {
+        "complete": 244,
+        "partial": 44,
+        "unavailable": 54
+      },
+      "descriptives_by_cohort": {},
+      "descriptives_by_era": {},
+      "descriptives_by_state_at_cutoff": {},
+      "exclusive_exclusions": {
+        "feature_finalized_after_label": 244,
+        "flow_partial": 44,
+        "flow_unavailable": 54
+      },
+      "feature_cutoff_seconds": 30,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "curve_sell_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "top1_buy_recipient_token_share": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "total_directional_event_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "unique_buy_recipients": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": null,
+        "n": 0,
+        "p10": null,
+        "p25": null,
+        "p75": null,
+        "p90": null
+      },
+      "label_horizon_seconds": 900,
+      "label_price_multiple_t0_to_h": {
+        "median": null,
+        "n": 0,
+        "p10": null,
+        "p25": null,
+        "p75": null,
+        "p90": null
+      },
+      "mature_denominator": 342,
+      "minimum_observed_separation_seconds": null,
+      "minimum_scheduled_separation_seconds": 870,
+      "split_era_launch_span_days": null,
+      "usable_by_cohort": {},
+      "usable_by_era": {},
+      "usable_by_label_market_phase": {},
+      "usable_by_state_at_cutoff": {},
+      "usable_n": 0
+    },
+    {
+      "coverage": {
+        "complete": 244,
+        "partial": 44,
+        "unavailable": 54
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 0.999038283060006,
+            "n": 28,
+            "p10": 0.5955856997539398,
+            "p25": 0.8316963285410773,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 28
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 27,
+            "p10": 0.5916501232765511,
+            "p25": 0.8577698709259975,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 27
+        },
+        "SPLIT_FLOW_ERA": {
+          "label_multiple": {
+            "median": 0.7940519429907146,
+            "n": 1,
+            "p10": 0.7940519429907146,
+            "p25": 0.7940519429907146,
+            "p75": 0.7940519429907146,
+            "p90": 0.7940519429907146
+          },
+          "median_curve_buy_count": 4.0,
+          "median_directional_event_count": 6.0,
+          "n": 1
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 0.999038283060006,
+            "n": 28,
+            "p10": 0.5955856997539398,
+            "p25": 0.8316963285410773,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 28
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 28,
+        "feature_finalized_after_label": 216,
+        "flow_partial": 44,
+        "flow_unavailable": 54
+      },
+      "feature_cutoff_seconds": 30,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "feature": {
+            "median": 1.0,
+            "n": 28,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 4.5,
+            "p90": 21.800000000000004
+          },
+          "n": 28,
+          "note": "tiny_sample_no_correlation"
+        },
+        "curve_sell_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 28,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 2.0,
+            "p90": 11.600000000000001
+          },
+          "n": 28,
+          "note": "tiny_sample_no_correlation"
+        },
+        "top1_buy_recipient_token_share": {
+          "feature": {
+            "median": 0.9669859200742932,
+            "n": 19,
+            "p10": 0.31607828215945205,
+            "p25": 0.5986702651949078,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "n": 19,
+          "note": "tiny_sample_no_correlation"
+        },
+        "total_directional_event_count": {
+          "feature": {
+            "median": 1.0,
+            "n": 28,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 6.5,
+            "p90": 34.30000000000001
+          },
+          "n": 28,
+          "note": "tiny_sample_no_correlation"
+        },
+        "unique_buy_recipients": {
+          "feature": {
+            "median": 1.0,
+            "n": 28,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 4.25,
+            "p90": 10.0
+          },
+          "n": 28,
+          "note": "tiny_sample_no_correlation"
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 28,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 28,
+          "note": "tiny_sample_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 0.999038283060006,
+        "n": 28,
+        "p10": 0.5955856997539398,
+        "p25": 0.8316963285410773,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 3600,
+      "label_price_multiple_t0_to_h": {
+        "median": 0.999038283060006,
+        "n": 28,
+        "p10": 0.5955856997539398,
+        "p25": 0.8316963285410773,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 342,
+      "minimum_observed_separation_seconds": 3576.0,
+      "minimum_scheduled_separation_seconds": 3570,
+      "split_era_launch_span_days": 0.0,
+      "usable_by_cohort": {
+        "long": 28
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 27,
+        "SPLIT_FLOW_ERA": 1
+      },
+      "usable_by_label_market_phase": {
+        "curve": 28
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 28
+      },
+      "usable_n": 28
+    },
+    {
+      "coverage": {
+        "complete": 239,
+        "partial": 43,
+        "unavailable": 54
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 234,
+            "p10": 0.6432694990141146,
+            "p25": 0.8403031663454343,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 234
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 218,
+            "p10": 0.6287252045248837,
+            "p25": 0.8385780253402475,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 218
+        },
+        "SPLIT_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 16,
+            "p10": 0.7913458919646961,
+            "p25": 0.8854440250824316,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 16
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 233,
+            "p10": 0.6488233255763313,
+            "p25": 0.8407285633062789,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 233
+        },
+        "v4_at_cutoff": {
+          "label_multiple": {
+            "median": 0.04733083964510606,
+            "n": 1,
+            "p10": 0.04733083964510606,
+            "p25": 0.04733083964510606,
+            "p75": 0.04733083964510606,
+            "p90": 0.04733083964510606
+          },
+          "median_curve_buy_count": 2.0,
+          "median_directional_event_count": 67.0,
+          "n": 1
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 234,
+        "feature_finalized_after_label": 5,
+        "flow_partial": 43,
+        "flow_unavailable": 54,
+        "not_mature": 6
+      },
+      "feature_cutoff_seconds": 30,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "bootstrap_95pct": [
+            -0.8197925399302881,
+            -0.5933637900005633
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 234,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 4.0,
+            "p90": 12.700000000000017
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 78
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 78
+            },
+            {
+              "median_label_multiple": 0.7854214852430479,
+              "n": 78
+            }
+          ],
+          "n": 234,
+          "spearman": -0.7084172823049786
+        },
+        "curve_sell_count": {
+          "bootstrap_95pct": [
+            -0.7049910207218969,
+            -0.48115631091996214
+          ],
+          "feature": {
+            "median": 0.0,
+            "n": 234,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 1.0,
+            "p90": 7.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 78
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 78
+            },
+            {
+              "median_label_multiple": 0.7854214852430479,
+              "n": 78
+            }
+          ],
+          "n": 234,
+          "spearman": -0.5750351573169388
+        },
+        "top1_buy_recipient_token_share": {
+          "bootstrap_95pct": [
+            0.31557363996092347,
+            0.6249853431131692
+          ],
+          "feature": {
+            "median": 0.80077201423352,
+            "n": 128,
+            "p10": 0.29943227161744196,
+            "p25": 0.5214951566413759,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 0.7765299009243154,
+              "n": 42
+            },
+            {
+              "median_label_multiple": 0.7473385089986554,
+              "n": 43
+            },
+            {
+              "median_label_multiple": 0.9931407322724553,
+              "n": 43
+            }
+          ],
+          "n": 128,
+          "spearman": 0.47667777697812347
+        },
+        "total_directional_event_count": {
+          "bootstrap_95pct": [
+            -0.8022179099748312,
+            -0.5876866360935481
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 234,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.75,
+            "p90": 19.700000000000017
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 78
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 78
+            },
+            {
+              "median_label_multiple": 0.7677670689376903,
+              "n": 78
+            }
+          ],
+          "n": 234,
+          "spearman": -0.7095051887351609
+        },
+        "unique_buy_recipients": {
+          "bootstrap_95pct": [
+            -0.8134307306558721,
+            -0.5805532526516155
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 234,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 3.0,
+            "p90": 8.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 78
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 78
+            },
+            {
+              "median_label_multiple": 0.7854214852430479,
+              "n": 78
+            }
+          ],
+          "n": 234,
+          "spearman": -0.712318670646713
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 234,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 234,
+          "note": "sparse_feature_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 234,
+        "p10": 0.6432694990141146,
+        "p25": 0.8403031663454343,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 21600,
+      "label_price_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 234,
+        "p10": 0.6432694990141146,
+        "p25": 0.8403031663454343,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 336,
+      "minimum_observed_separation_seconds": 21570.0,
+      "minimum_scheduled_separation_seconds": 21570,
+      "split_era_launch_span_days": 0.7173148148148148,
+      "usable_by_cohort": {
+        "long": 234
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 218,
+        "SPLIT_FLOW_ERA": 16
+      },
+      "usable_by_label_market_phase": {
+        "curve": 230,
+        "v4": 4
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 233,
+        "v4_at_cutoff": 1
+      },
+      "usable_n": 234
+    },
+    {
+      "coverage": {
+        "complete": 223,
+        "partial": 43,
+        "unavailable": 53
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 222,
+            "p10": 0.6381736417176206,
+            "p25": 0.8362557399155587,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 222
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 222,
+            "p10": 0.6381736417176206,
+            "p25": 0.8362557399155587,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 222
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 221,
+            "p10": 0.6409260144312537,
+            "p25": 0.8377671643752914,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 221
+        },
+        "v4_at_cutoff": {
+          "label_multiple": {
+            "median": 0.04659218460269736,
+            "n": 1,
+            "p10": 0.04659218460269736,
+            "p25": 0.04659218460269736,
+            "p75": 0.04659218460269736,
+            "p90": 0.04659218460269736
+          },
+          "median_curve_buy_count": 2.0,
+          "median_directional_event_count": 67.0,
+          "n": 1
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 222,
+        "feature_finalized_after_label": 1,
+        "flow_partial": 43,
+        "flow_unavailable": 53,
+        "not_mature": 23
+      },
+      "feature_cutoff_seconds": 30,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "bootstrap_95pct": [
+            -0.8515246344252764,
+            -0.6499991338836628
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 222,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 4.0,
+            "p90": 13.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 74
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 74
+            },
+            {
+              "median_label_multiple": 0.7615793119211369,
+              "n": 74
+            }
+          ],
+          "n": 222,
+          "spearman": -0.7586763762191605
+        },
+        "curve_sell_count": {
+          "bootstrap_95pct": [
+            -0.6583998055203043,
+            -0.4327720873128783
+          ],
+          "feature": {
+            "median": 0.0,
+            "n": 222,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 1.0,
+            "p90": 7.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 0.9931570489853515,
+              "n": 74
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 74
+            },
+            {
+              "median_label_multiple": 0.7723238022411639,
+              "n": 74
+            }
+          ],
+          "n": 222,
+          "spearman": -0.5497565605509998
+        },
+        "top1_buy_recipient_token_share": {
+          "bootstrap_95pct": [
+            0.35775064767125636,
+            0.6343251491478858
+          ],
+          "feature": {
+            "median": 0.8056453255528969,
+            "n": 121,
+            "p10": 0.3005738677684387,
+            "p25": 0.5324460728837846,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 0.6932788062490142,
+              "n": 40
+            },
+            {
+              "median_label_multiple": 0.7619046912671242,
+              "n": 40
+            },
+            {
+              "median_label_multiple": 0.9863262828412188,
+              "n": 41
+            }
+          ],
+          "n": 121,
+          "spearman": 0.4973427834164885
+        },
+        "total_directional_event_count": {
+          "bootstrap_95pct": [
+            -0.8477943238698461,
+            -0.6493128901149754
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 222,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.0,
+            "p90": 19.900000000000006
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 74
+            },
+            {
+              "median_label_multiple": 0.9999136131524495,
+              "n": 74
+            },
+            {
+              "median_label_multiple": 0.7491643306035594,
+              "n": 74
+            }
+          ],
+          "n": 222,
+          "spearman": -0.7563021408556684
+        },
+        "unique_buy_recipients": {
+          "bootstrap_95pct": [
+            -0.8528130543118754,
+            -0.6684243835275616
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 222,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 3.0,
+            "p90": 8.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 74
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 74
+            },
+            {
+              "median_label_multiple": 0.7667615228726263,
+              "n": 74
+            }
+          ],
+          "n": 222,
+          "spearman": -0.763788365322307
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 222,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 222,
+          "note": "sparse_feature_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 222,
+        "p10": 0.6381736417176206,
+        "p25": 0.8362557399155587,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 86400,
+      "label_price_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 222,
+        "p10": 0.6381736417176206,
+        "p25": 0.8362557399155587,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 319,
+      "minimum_observed_separation_seconds": 86370.0,
+      "minimum_scheduled_separation_seconds": 86370,
+      "split_era_launch_span_days": null,
+      "usable_by_cohort": {
+        "long": 222
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 222
+      },
+      "usable_by_label_market_phase": {
+        "curve": 218,
+        "v4": 4
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 221,
+        "v4_at_cutoff": 1
+      },
+      "usable_n": 222
+    },
+    {
+      "coverage": {
+        "complete": 495,
+        "partial": 96,
+        "unavailable": 96
+      },
+      "descriptives_by_cohort": {},
+      "descriptives_by_era": {},
+      "descriptives_by_state_at_cutoff": {},
+      "exclusive_exclusions": {
+        "feature_finalized_after_label": 495,
+        "flow_partial": 96,
+        "flow_unavailable": 96
+      },
+      "feature_cutoff_seconds": 60,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "curve_sell_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "top1_buy_recipient_token_share": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "total_directional_event_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "unique_buy_recipients": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": null,
+        "n": 0,
+        "p10": null,
+        "p25": null,
+        "p75": null,
+        "p90": null
+      },
+      "label_horizon_seconds": 300,
+      "label_price_multiple_t0_to_h": {
+        "median": null,
+        "n": 0,
+        "p10": null,
+        "p25": null,
+        "p75": null,
+        "p90": null
+      },
+      "mature_denominator": 687,
+      "minimum_observed_separation_seconds": null,
+      "minimum_scheduled_separation_seconds": 240,
+      "split_era_launch_span_days": null,
+      "usable_by_cohort": {},
+      "usable_by_era": {},
+      "usable_by_label_market_phase": {},
+      "usable_by_state_at_cutoff": {},
+      "usable_n": 0
+    },
+    {
+      "coverage": {
+        "complete": 243,
+        "partial": 51,
+        "unavailable": 48
+      },
+      "descriptives_by_cohort": {},
+      "descriptives_by_era": {},
+      "descriptives_by_state_at_cutoff": {},
+      "exclusive_exclusions": {
+        "feature_finalized_after_label": 243,
+        "flow_partial": 51,
+        "flow_unavailable": 48
+      },
+      "feature_cutoff_seconds": 60,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "curve_sell_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "top1_buy_recipient_token_share": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "total_directional_event_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "unique_buy_recipients": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": null,
+        "n": 0,
+        "p10": null,
+        "p25": null,
+        "p75": null,
+        "p90": null
+      },
+      "label_horizon_seconds": 900,
+      "label_price_multiple_t0_to_h": {
+        "median": null,
+        "n": 0,
+        "p10": null,
+        "p25": null,
+        "p75": null,
+        "p90": null
+      },
+      "mature_denominator": 342,
+      "minimum_observed_separation_seconds": null,
+      "minimum_scheduled_separation_seconds": 840,
+      "split_era_launch_span_days": null,
+      "usable_by_cohort": {},
+      "usable_by_era": {},
+      "usable_by_label_market_phase": {},
+      "usable_by_state_at_cutoff": {},
+      "usable_n": 0
+    },
+    {
+      "coverage": {
+        "complete": 243,
+        "partial": 51,
+        "unavailable": 48
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 0.9980765661200119,
+            "n": 27,
+            "p10": 0.5916501232765511,
+            "p25": 0.8191482000242898,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 27
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 0.999038283060006,
+            "n": 26,
+            "p10": 0.5877145467991625,
+            "p25": 0.8510071639919312,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.5,
+          "n": 26
+        },
+        "SPLIT_FLOW_ERA": {
+          "label_multiple": {
+            "median": 0.7940519429907146,
+            "n": 1,
+            "p10": 0.7940519429907146,
+            "p25": 0.7940519429907146,
+            "p75": 0.7940519429907146,
+            "p90": 0.7940519429907146
+          },
+          "median_curve_buy_count": 4.0,
+          "median_directional_event_count": 6.0,
+          "n": 1
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 0.9980765661200119,
+            "n": 27,
+            "p10": 0.5916501232765511,
+            "p25": 0.8191482000242898,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 27
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 27,
+        "feature_finalized_after_label": 216,
+        "flow_partial": 51,
+        "flow_unavailable": 48
+      },
+      "feature_cutoff_seconds": 60,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "feature": {
+            "median": 1.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.0,
+            "p90": 24.400000000000013
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        },
+        "curve_sell_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 2.0,
+            "p90": 13.00000000000001
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        },
+        "top1_buy_recipient_token_share": {
+          "feature": {
+            "median": 0.8863156228135951,
+            "n": 18,
+            "p10": 0.2959676823851203,
+            "p25": 0.5233206508080825,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "n": 18,
+          "note": "tiny_sample_no_correlation"
+        },
+        "total_directional_event_count": {
+          "feature": {
+            "median": 2.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 9.0,
+            "p90": 37.40000000000002
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        },
+        "unique_buy_recipients": {
+          "feature": {
+            "median": 1.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 4.5,
+            "p90": 10.400000000000002
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 0.9980765661200119,
+        "n": 27,
+        "p10": 0.5916501232765511,
+        "p25": 0.8191482000242898,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 3600,
+      "label_price_multiple_t0_to_h": {
+        "median": 0.9980765661200119,
+        "n": 27,
+        "p10": 0.5916501232765511,
+        "p25": 0.8191482000242898,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 342,
+      "minimum_observed_separation_seconds": 3546.0,
+      "minimum_scheduled_separation_seconds": 3540,
+      "split_era_launch_span_days": 0.0,
+      "usable_by_cohort": {
+        "long": 27
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 26,
+        "SPLIT_FLOW_ERA": 1
+      },
+      "usable_by_label_market_phase": {
+        "curve": 27
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 27
+      },
+      "usable_n": 27
+    },
+    {
+      "coverage": {
+        "complete": 238,
+        "partial": 50,
+        "unavailable": 48
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 233,
+            "p10": 0.6424883374864943,
+            "p25": 0.8401613673584861,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 233
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 217,
+            "p10": 0.6256776651907725,
+            "p25": 0.8380502446675013,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 217
+        },
+        "SPLIT_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 16,
+            "p10": 0.7913458919646961,
+            "p25": 0.8854440250824316,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 16
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 232,
+            "p10": 0.6487804776418938,
+            "p25": 0.8405867643193307,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 232
+        },
+        "v4_at_cutoff": {
+          "label_multiple": {
+            "median": 0.04733083964510606,
+            "n": 1,
+            "p10": 0.04733083964510606,
+            "p25": 0.04733083964510606,
+            "p75": 0.04733083964510606,
+            "p90": 0.04733083964510606
+          },
+          "median_curve_buy_count": 2.0,
+          "median_directional_event_count": 95.0,
+          "n": 1
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 233,
+        "feature_finalized_after_label": 5,
+        "flow_partial": 50,
+        "flow_unavailable": 48,
+        "not_mature": 6
+      },
+      "feature_cutoff_seconds": 60,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "bootstrap_95pct": [
+            -0.7898971625167583,
+            -0.5703788476615004
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 233,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.0,
+            "p90": 16.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 78
+            },
+            {
+              "median_label_multiple": 0.7765299009243154,
+              "n": 78
+            }
+          ],
+          "n": 233,
+          "spearman": -0.688172956134662
+        },
+        "curve_sell_count": {
+          "bootstrap_95pct": [
+            -0.7574424182903071,
+            -0.5475582463786418
+          ],
+          "feature": {
+            "median": 0.0,
+            "n": 233,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 2.0,
+            "p90": 10.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 78
+            },
+            {
+              "median_label_multiple": 0.8527771247467508,
+              "n": 78
+            }
+          ],
+          "n": 233,
+          "spearman": -0.6624183214696745
+        },
+        "top1_buy_recipient_token_share": {
+          "bootstrap_95pct": [
+            0.3529053973184994,
+            0.6452982894722891
+          ],
+          "feature": {
+            "median": 0.7007364629835092,
+            "n": 130,
+            "p10": 0.29584695663397514,
+            "p25": 0.40169322203554464,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 0.7473385089986554,
+              "n": 43
+            },
+            {
+              "median_label_multiple": 0.8341123050906524,
+              "n": 43
+            },
+            {
+              "median_label_multiple": 0.9931570489853515,
+              "n": 44
+            }
+          ],
+          "n": 130,
+          "spearman": 0.4914273206814331
+        },
+        "total_directional_event_count": {
+          "bootstrap_95pct": [
+            -0.7961546608144087,
+            -0.5831066993282226
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 233,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 7.0,
+            "p90": 31.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 78
+            },
+            {
+              "median_label_multiple": 0.752030494657145,
+              "n": 78
+            }
+          ],
+          "n": 233,
+          "spearman": -0.7004445196038458
+        },
+        "unique_buy_recipients": {
+          "bootstrap_95pct": [
+            -0.794270363567186,
+            -0.5805233922724885
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 233,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 4.0,
+            "p90": 9.800000000000011
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 78
+            },
+            {
+              "median_label_multiple": 0.752030494657145,
+              "n": 78
+            }
+          ],
+          "n": 233,
+          "spearman": -0.7065164080178332
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 233,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 233,
+          "note": "sparse_feature_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 233,
+        "p10": 0.6424883374864943,
+        "p25": 0.8401613673584861,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 21600,
+      "label_price_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 233,
+        "p10": 0.6424883374864943,
+        "p25": 0.8401613673584861,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 336,
+      "minimum_observed_separation_seconds": 21540.0,
+      "minimum_scheduled_separation_seconds": 21540,
+      "split_era_launch_span_days": 0.7173148148148148,
+      "usable_by_cohort": {
+        "long": 233
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 217,
+        "SPLIT_FLOW_ERA": 16
+      },
+      "usable_by_label_market_phase": {
+        "curve": 229,
+        "v4": 4
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 232,
+        "v4_at_cutoff": 1
+      },
+      "usable_n": 233
+    },
+    {
+      "coverage": {
+        "complete": 222,
+        "partial": 50,
+        "unavailable": 47
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 221,
+            "p10": 0.6378678225272169,
+            "p25": 0.8357519317623144,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 221
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 221,
+            "p10": 0.6378678225272169,
+            "p25": 0.8357519317623144,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 221
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 220,
+            "p10": 0.64062019524085,
+            "p25": 0.8372633562220472,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 220
+        },
+        "v4_at_cutoff": {
+          "label_multiple": {
+            "median": 0.04659218460269736,
+            "n": 1,
+            "p10": 0.04659218460269736,
+            "p25": 0.04659218460269736,
+            "p75": 0.04659218460269736,
+            "p90": 0.04659218460269736
+          },
+          "median_curve_buy_count": 2.0,
+          "median_directional_event_count": 95.0,
+          "n": 1
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 221,
+        "feature_finalized_after_label": 1,
+        "flow_partial": 50,
+        "flow_unavailable": 47,
+        "not_mature": 23
+      },
+      "feature_cutoff_seconds": 60,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "bootstrap_95pct": [
+            -0.8442151579497597,
+            -0.6209845973791076
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 221,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.0,
+            "p90": 19.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 74
+            },
+            {
+              "median_label_multiple": 0.7615793119211369,
+              "n": 74
+            }
+          ],
+          "n": 221,
+          "spearman": -0.7358462361481901
+        },
+        "curve_sell_count": {
+          "bootstrap_95pct": [
+            -0.7782444021666639,
+            -0.5535705157483831
+          ],
+          "feature": {
+            "median": 0.0,
+            "n": 221,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 2.0,
+            "p90": 10.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 74
+            },
+            {
+              "median_label_multiple": 0.840237214461756,
+              "n": 74
+            }
+          ],
+          "n": 221,
+          "spearman": -0.6587170817853547
+        },
+        "top1_buy_recipient_token_share": {
+          "bootstrap_95pct": [
+            0.36305793021307275,
+            0.6580857202549847
+          ],
+          "feature": {
+            "median": 0.6967874792702488,
+            "n": 123,
+            "p10": 0.29015688631665154,
+            "p25": 0.4106570785822399,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 0.6839020583107692,
+              "n": 41
+            },
+            {
+              "median_label_multiple": 0.8357519317623144,
+              "n": 41
+            },
+            {
+              "median_label_multiple": 0.9924667623640859,
+              "n": 41
+            }
+          ],
+          "n": 123,
+          "spearman": 0.5318008393068034
+        },
+        "total_directional_event_count": {
+          "bootstrap_95pct": [
+            -0.8321113743808517,
+            -0.6490354970534463
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 221,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 7.0,
+            "p90": 32.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.9999136131524495,
+              "n": 74
+            },
+            {
+              "median_label_multiple": 0.7491643306035594,
+              "n": 74
+            }
+          ],
+          "n": 221,
+          "spearman": -0.7444367552253232
+        },
+        "unique_buy_recipients": {
+          "bootstrap_95pct": [
+            -0.8440288245442772,
+            -0.6349577492401705
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 221,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 4.0,
+            "p90": 10.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 74
+            },
+            {
+              "median_label_multiple": 0.7329742348960469,
+              "n": 74
+            }
+          ],
+          "n": 221,
+          "spearman": -0.7568293043070923
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 221,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 221,
+          "note": "sparse_feature_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 221,
+        "p10": 0.6378678225272169,
+        "p25": 0.8357519317623144,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 86400,
+      "label_price_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 221,
+        "p10": 0.6378678225272169,
+        "p25": 0.8357519317623144,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 319,
+      "minimum_observed_separation_seconds": 86340.0,
+      "minimum_scheduled_separation_seconds": 86340,
+      "split_era_launch_span_days": null,
+      "usable_by_cohort": {
+        "long": 221
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 221
+      },
+      "usable_by_label_market_phase": {
+        "curve": 217,
+        "v4": 4
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 220,
+        "v4_at_cutoff": 1
+      },
+      "usable_n": 221
+    },
+    {
+      "coverage": {
+        "complete": 242,
+        "partial": 57,
+        "unavailable": 43
+      },
+      "descriptives_by_cohort": {},
+      "descriptives_by_era": {},
+      "descriptives_by_state_at_cutoff": {},
+      "exclusive_exclusions": {
+        "feature_finalized_after_label": 242,
+        "flow_partial": 57,
+        "flow_unavailable": 43
+      },
+      "feature_cutoff_seconds": 300,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "curve_sell_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "top1_buy_recipient_token_share": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "total_directional_event_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "unique_buy_recipients": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": null,
+            "n": 0,
+            "p10": null,
+            "p25": null,
+            "p75": null,
+            "p90": null
+          },
+          "n": 0,
+          "note": "tiny_sample_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": null,
+        "n": 0,
+        "p10": null,
+        "p25": null,
+        "p75": null,
+        "p90": null
+      },
+      "label_horizon_seconds": 900,
+      "label_price_multiple_t0_to_h": {
+        "median": null,
+        "n": 0,
+        "p10": null,
+        "p25": null,
+        "p75": null,
+        "p90": null
+      },
+      "mature_denominator": 342,
+      "minimum_observed_separation_seconds": null,
+      "minimum_scheduled_separation_seconds": 600,
+      "split_era_launch_span_days": null,
+      "usable_by_cohort": {},
+      "usable_by_era": {},
+      "usable_by_label_market_phase": {},
+      "usable_by_state_at_cutoff": {},
+      "usable_n": 0
+    },
+    {
+      "coverage": {
+        "complete": 242,
+        "partial": 57,
+        "unavailable": 43
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 0.9980765661200119,
+            "n": 27,
+            "p10": 0.5916501232765511,
+            "p25": 0.8191482000242898,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 3.0,
+          "n": 27
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 0.999038283060006,
+            "n": 26,
+            "p10": 0.5877145467991625,
+            "p25": 0.8510071639919312,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.5,
+          "n": 26
+        },
+        "SPLIT_FLOW_ERA": {
+          "label_multiple": {
+            "median": 0.7940519429907146,
+            "n": 1,
+            "p10": 0.7940519429907146,
+            "p25": 0.7940519429907146,
+            "p75": 0.7940519429907146,
+            "p90": 0.7940519429907146
+          },
+          "median_curve_buy_count": 5.0,
+          "median_directional_event_count": 7.0,
+          "n": 1
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 0.9980765661200119,
+            "n": 27,
+            "p10": 0.5916501232765511,
+            "p25": 0.8191482000242898,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 3.0,
+          "n": 27
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 27,
+        "feature_finalized_after_label": 215,
+        "flow_partial": 57,
+        "flow_unavailable": 43
+      },
+      "feature_cutoff_seconds": 300,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "feature": {
+            "median": 1.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 6.0,
+            "p90": 31.00000000000002
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        },
+        "curve_sell_count": {
+          "feature": {
+            "median": 1.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 4.0,
+            "p90": 21.800000000000026
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        },
+        "top1_buy_recipient_token_share": {
+          "feature": {
+            "median": 0.6797645969151246,
+            "n": 18,
+            "p10": 0.3054578179924378,
+            "p25": 0.47650125308262636,
+            "p75": 0.9955579861273783,
+            "p90": 1.0
+          },
+          "n": 18,
+          "note": "tiny_sample_no_correlation"
+        },
+        "total_directional_event_count": {
+          "feature": {
+            "median": 3.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 9.5,
+            "p90": 52.80000000000005
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        },
+        "unique_buy_recipients": {
+          "feature": {
+            "median": 1.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.0,
+            "p90": 13.0
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 0.9980765661200119,
+        "n": 27,
+        "p10": 0.5916501232765511,
+        "p25": 0.8191482000242898,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 3600,
+      "label_price_multiple_t0_to_h": {
+        "median": 0.9980765661200119,
+        "n": 27,
+        "p10": 0.5916501232765511,
+        "p25": 0.8191482000242898,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 342,
+      "minimum_observed_separation_seconds": 3306.0,
+      "minimum_scheduled_separation_seconds": 3300,
+      "split_era_launch_span_days": 0.0,
+      "usable_by_cohort": {
+        "long": 27
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 26,
+        "SPLIT_FLOW_ERA": 1
+      },
+      "usable_by_label_market_phase": {
+        "curve": 27
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 27
+      },
+      "usable_n": 27
+    },
+    {
+      "coverage": {
+        "complete": 237,
+        "partial": 56,
+        "unavailable": 43
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 232,
+            "p10": 0.641707175958874,
+            "p25": 0.83963358668574,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 232
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 216,
+            "p10": 0.6226301258566613,
+            "p25": 0.8379794745944489,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 216
+        },
+        "SPLIT_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 16,
+            "p10": 0.7913458919646961,
+            "p25": 0.8854440250824316,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.0,
+          "n": 16
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 231,
+            "p10": 0.6487376297074564,
+            "p25": 0.8404449653323824,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 231
+        },
+        "v4_at_cutoff": {
+          "label_multiple": {
+            "median": 0.04733083964510606,
+            "n": 1,
+            "p10": 0.04733083964510606,
+            "p25": 0.04733083964510606,
+            "p75": 0.04733083964510606,
+            "p90": 0.04733083964510606
+          },
+          "median_curve_buy_count": 2.0,
+          "median_directional_event_count": 151.0,
+          "n": 1
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 232,
+        "feature_finalized_after_label": 5,
+        "flow_partial": 56,
+        "flow_unavailable": 43,
+        "not_mature": 6
+      },
+      "feature_cutoff_seconds": 300,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "bootstrap_95pct": [
+            -0.7309662362154946,
+            -0.5059690558809307
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 232,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.25,
+            "p90": 22.80000000000001
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 0.7444723449450698,
+              "n": 78
+            }
+          ],
+          "n": 232,
+          "spearman": -0.6242691461842853
+        },
+        "curve_sell_count": {
+          "bootstrap_95pct": [
+            -0.7724871576741424,
+            -0.538342370835543
+          ],
+          "feature": {
+            "median": 0.5,
+            "n": 232,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 3.0,
+            "p90": 14.900000000000006
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 0.7875842358010787,
+              "n": 78
+            }
+          ],
+          "n": 232,
+          "spearman": -0.6632540831013877
+        },
+        "top1_buy_recipient_token_share": {
+          "bootstrap_95pct": [
+            0.27852102054510497,
+            0.5759285229458994
+          ],
+          "feature": {
+            "median": 0.668946916012323,
+            "n": 135,
+            "p10": 0.2776184213853853,
+            "p25": 0.4083375341584744,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 0.7846125661918637,
+              "n": 45
+            },
+            {
+              "median_label_multiple": 0.7889380673079256,
+              "n": 45
+            },
+            {
+              "median_label_multiple": 0.9937233096639376,
+              "n": 45
+            }
+          ],
+          "n": 135,
+          "spearman": 0.4629066614368973
+        },
+        "total_directional_event_count": {
+          "bootstrap_95pct": [
+            -0.7685229799400278,
+            -0.5278566912190853
+          ],
+          "feature": {
+            "median": 2.0,
+            "n": 232,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 10.0,
+            "p90": 42.30000000000004
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 0.7341870950949632,
+              "n": 78
+            }
+          ],
+          "n": 232,
+          "spearman": -0.6456167216808776
+        },
+        "unique_buy_recipients": {
+          "bootstrap_95pct": [
+            -0.7593767360216503,
+            -0.5170017937810107
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 232,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.0,
+            "p90": 13.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 0.7444723449450698,
+              "n": 78
+            }
+          ],
+          "n": 232,
+          "spearman": -0.6413186941234437
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 232,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 232,
+          "note": "sparse_feature_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 232,
+        "p10": 0.641707175958874,
+        "p25": 0.83963358668574,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 21600,
+      "label_price_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 232,
+        "p10": 0.641707175958874,
+        "p25": 0.83963358668574,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 336,
+      "minimum_observed_separation_seconds": 21300.0,
+      "minimum_scheduled_separation_seconds": 21300,
+      "split_era_launch_span_days": 0.7173148148148148,
+      "usable_by_cohort": {
+        "long": 232
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 216,
+        "SPLIT_FLOW_ERA": 16
+      },
+      "usable_by_label_market_phase": {
+        "curve": 228,
+        "v4": 4
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 231,
+        "v4_at_cutoff": 1
+      },
+      "usable_n": 232
+    },
+    {
+      "coverage": {
+        "complete": 221,
+        "partial": 56,
+        "unavailable": 42
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 220,
+            "p10": 0.6348202831931058,
+            "p25": 0.8353420250943989,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 220
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 220,
+            "p10": 0.6348202831931058,
+            "p25": 0.8353420250943989,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 220
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 219,
+            "p10": 0.6403143760504464,
+            "p25": 0.8367595480688029,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 219
+        },
+        "v4_at_cutoff": {
+          "label_multiple": {
+            "median": 0.04659218460269736,
+            "n": 1,
+            "p10": 0.04659218460269736,
+            "p25": 0.04659218460269736,
+            "p75": 0.04659218460269736,
+            "p90": 0.04659218460269736
+          },
+          "median_curve_buy_count": 2.0,
+          "median_directional_event_count": 151.0,
+          "n": 1
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 220,
+        "feature_finalized_after_label": 1,
+        "flow_partial": 56,
+        "flow_unavailable": 42,
+        "not_mature": 23
+      },
+      "feature_cutoff_seconds": 300,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "bootstrap_95pct": [
+            -0.7737451249383187,
+            -0.5428826518065651
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 220,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.25,
+            "p90": 25.19999999999999
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.9998633768424076,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.7199609594862677,
+              "n": 74
+            }
+          ],
+          "n": 220,
+          "spearman": -0.6709814387631877
+        },
+        "curve_sell_count": {
+          "bootstrap_95pct": [
+            -0.7843394414016863,
+            -0.5606687428078061
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 220,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 3.0,
+            "p90": 16.099999999999994
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.788133581973912,
+              "n": 74
+            }
+          ],
+          "n": 220,
+          "spearman": -0.6632262546823168
+        },
+        "top1_buy_recipient_token_share": {
+          "bootstrap_95pct": [
+            0.36636196417070555,
+            0.6349701579663258
+          ],
+          "feature": {
+            "median": 0.668946916012323,
+            "n": 129,
+            "p10": 0.2789026771032381,
+            "p25": 0.41901440573078663,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 0.7416061808914841,
+              "n": 43
+            },
+            {
+              "median_label_multiple": 0.8210252788662014,
+              "n": 43
+            },
+            {
+              "median_label_multiple": 0.9937233096639376,
+              "n": 43
+            }
+          ],
+          "n": 129,
+          "spearman": 0.5185701635495199
+        },
+        "total_directional_event_count": {
+          "bootstrap_95pct": [
+            -0.8052578184535412,
+            -0.5661520594820081
+          ],
+          "feature": {
+            "median": 2.0,
+            "n": 220,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 10.0,
+            "p90": 44.799999999999955
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.9999638494624914,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.7174388295114801,
+              "n": 74
+            }
+          ],
+          "n": 220,
+          "spearman": -0.688160778573203
+        },
+        "unique_buy_recipients": {
+          "bootstrap_95pct": [
+            -0.7996020336617969,
+            -0.5809118741042124
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 220,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.0,
+            "p90": 13.099999999999994
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.9999638494624914,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.7199609594862677,
+              "n": 74
+            }
+          ],
+          "n": 220,
+          "spearman": -0.6876194826689267
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 220,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 220,
+          "note": "sparse_feature_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 220,
+        "p10": 0.6348202831931058,
+        "p25": 0.8353420250943989,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 86400,
+      "label_price_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 220,
+        "p10": 0.6348202831931058,
+        "p25": 0.8353420250943989,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 319,
+      "minimum_observed_separation_seconds": 86100.0,
+      "minimum_scheduled_separation_seconds": 86100,
+      "split_era_launch_span_days": null,
+      "usable_by_cohort": {
+        "long": 220
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 220
+      },
+      "usable_by_label_market_phase": {
+        "curve": 216,
+        "v4": 4
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 219,
+        "v4_at_cutoff": 1
+      },
+      "usable_n": 220
+    },
+    {
+      "coverage": {
+        "complete": 240,
+        "partial": 59,
+        "unavailable": 43
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 0.9980765661200119,
+            "n": 27,
+            "p10": 0.5916501232765511,
+            "p25": 0.8191482000242898,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 3.0,
+          "n": 27
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 0.999038283060006,
+            "n": 26,
+            "p10": 0.5877145467991625,
+            "p25": 0.8510071639919312,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.5,
+          "n": 26
+        },
+        "SPLIT_FLOW_ERA": {
+          "label_multiple": {
+            "median": 0.7940519429907146,
+            "n": 1,
+            "p10": 0.7940519429907146,
+            "p25": 0.7940519429907146,
+            "p75": 0.7940519429907146,
+            "p90": 0.7940519429907146
+          },
+          "median_curve_buy_count": 5.0,
+          "median_directional_event_count": 7.0,
+          "n": 1
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 0.9980765661200119,
+            "n": 27,
+            "p10": 0.5916501232765511,
+            "p25": 0.8191482000242898,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 3.0,
+          "n": 27
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 27,
+        "feature_finalized_after_label": 213,
+        "flow_partial": 59,
+        "flow_unavailable": 43
+      },
+      "feature_cutoff_seconds": 900,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "feature": {
+            "median": 1.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 6.5,
+            "p90": 32.00000000000002
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        },
+        "curve_sell_count": {
+          "feature": {
+            "median": 2.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.5,
+            "p90": 24.800000000000036
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        },
+        "top1_buy_recipient_token_share": {
+          "feature": {
+            "median": 0.6584373177912323,
+            "n": 18,
+            "p10": 0.31108220825762917,
+            "p25": 0.4458226308598904,
+            "p75": 0.9955579861273783,
+            "p90": 1.0
+          },
+          "n": 18,
+          "note": "tiny_sample_no_correlation"
+        },
+        "total_directional_event_count": {
+          "feature": {
+            "median": 3.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 11.5,
+            "p90": 57.20000000000006
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        },
+        "unique_buy_recipients": {
+          "feature": {
+            "median": 1.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.0,
+            "p90": 13.400000000000002
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 27,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 27,
+          "note": "tiny_sample_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 0.9980765661200119,
+        "n": 27,
+        "p10": 0.5916501232765511,
+        "p25": 0.8191482000242898,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 3600,
+      "label_price_multiple_t0_to_h": {
+        "median": 0.9980765661200119,
+        "n": 27,
+        "p10": 0.5916501232765511,
+        "p25": 0.8191482000242898,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 342,
+      "minimum_observed_separation_seconds": 2706.0,
+      "minimum_scheduled_separation_seconds": 2700,
+      "split_era_launch_span_days": 0.0,
+      "usable_by_cohort": {
+        "long": 27
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 26,
+        "SPLIT_FLOW_ERA": 1
+      },
+      "usable_by_label_market_phase": {
+        "curve": 27
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 27
+      },
+      "usable_n": 27
+    },
+    {
+      "coverage": {
+        "complete": 235,
+        "partial": 58,
+        "unavailable": 43
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 231,
+            "p10": 0.6409260144312537,
+            "p25": 0.8391058060129937,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 231
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 215,
+            "p10": 0.6195825865225503,
+            "p25": 0.8379087045213964,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 215
+        },
+        "SPLIT_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 16,
+            "p10": 0.7913458919646961,
+            "p25": 0.8854440250824316,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.5,
+          "n": 16
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 230,
+            "p10": 0.6479564681798362,
+            "p25": 0.8403031663454343,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 230
+        },
+        "v4_at_cutoff": {
+          "label_multiple": {
+            "median": 0.04733083964510606,
+            "n": 1,
+            "p10": 0.04733083964510606,
+            "p25": 0.04733083964510606,
+            "p75": 0.04733083964510606,
+            "p90": 0.04733083964510606
+          },
+          "median_curve_buy_count": 2.0,
+          "median_directional_event_count": 152.0,
+          "n": 1
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 231,
+        "feature_finalized_after_label": 4,
+        "flow_partial": 58,
+        "flow_unavailable": 43,
+        "not_mature": 6
+      },
+      "feature_cutoff_seconds": 900,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "bootstrap_95pct": [
+            -0.7174612517707556,
+            -0.5087858662673052
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 231,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 6.0,
+            "p90": 25.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 0.7416061808914841,
+              "n": 77
+            }
+          ],
+          "n": 231,
+          "spearman": -0.6086532500003419
+        },
+        "curve_sell_count": {
+          "bootstrap_95pct": [
+            -0.7811180468606794,
+            -0.5329173568791766
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 231,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 4.0,
+            "p90": 19.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 0.7937537166214664,
+              "n": 77
+            }
+          ],
+          "n": 231,
+          "spearman": -0.6568668034628883
+        },
+        "top1_buy_recipient_token_share": {
+          "bootstrap_95pct": [
+            0.28750003781377625,
+            0.5962131457735509
+          ],
+          "feature": {
+            "median": 0.6379908564469765,
+            "n": 136,
+            "p10": 0.27313510123031204,
+            "p25": 0.3949525050330197,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 0.7846125661918637,
+              "n": 45
+            },
+            {
+              "median_label_multiple": 0.8210252788662014,
+              "n": 45
+            },
+            {
+              "median_label_multiple": 0.9979792078948402,
+              "n": 46
+            }
+          ],
+          "n": 136,
+          "spearman": 0.45488424779531456
+        },
+        "total_directional_event_count": {
+          "bootstrap_95pct": [
+            -0.7414047499335038,
+            -0.5344850432671244
+          ],
+          "feature": {
+            "median": 2.0,
+            "n": 231,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 11.5,
+            "p90": 46.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 0.7473385089986554,
+              "n": 77
+            }
+          ],
+          "n": 231,
+          "spearman": -0.6333652635515712
+        },
+        "unique_buy_recipients": {
+          "bootstrap_95pct": [
+            -0.7382363771981685,
+            -0.5440615198439606
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 231,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.0,
+            "p90": 15.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 77
+            },
+            {
+              "median_label_multiple": 0.7416061808914841,
+              "n": 77
+            }
+          ],
+          "n": 231,
+          "spearman": -0.6296117895690465
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 231,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 231,
+          "note": "sparse_feature_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 231,
+        "p10": 0.6409260144312537,
+        "p25": 0.8391058060129937,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 21600,
+      "label_price_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 231,
+        "p10": 0.6409260144312537,
+        "p25": 0.8391058060129937,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 336,
+      "minimum_observed_separation_seconds": 20700.0,
+      "minimum_scheduled_separation_seconds": 20700,
+      "split_era_launch_span_days": 0.7173148148148148,
+      "usable_by_cohort": {
+        "long": 231
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 215,
+        "SPLIT_FLOW_ERA": 16
+      },
+      "usable_by_label_market_phase": {
+        "curve": 227,
+        "v4": 4
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 230,
+        "v4_at_cutoff": 1
+      },
+      "usable_n": 231
+    },
+    {
+      "coverage": {
+        "complete": 219,
+        "partial": 58,
+        "unavailable": 42
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 219,
+            "p10": 0.6317727438589946,
+            "p25": 0.8349321184264834,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 219
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 219,
+            "p10": 0.6317727438589946,
+            "p25": 0.8349321184264834,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 219
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 218,
+            "p10": 0.6400085568600427,
+            "p25": 0.8362557399155587,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 218
+        },
+        "v4_at_cutoff": {
+          "label_multiple": {
+            "median": 0.04659218460269736,
+            "n": 1,
+            "p10": 0.04659218460269736,
+            "p25": 0.04659218460269736,
+            "p75": 0.04659218460269736,
+            "p90": 0.04659218460269736
+          },
+          "median_curve_buy_count": 2.0,
+          "median_directional_event_count": 152.0,
+          "n": 1
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 219,
+        "flow_partial": 58,
+        "flow_unavailable": 42,
+        "not_mature": 23
+      },
+      "feature_cutoff_seconds": 900,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "bootstrap_95pct": [
+            -0.749119221059035,
+            -0.5223669209280852
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 219,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 6.0,
+            "p90": 27.200000000000017
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.9998633768424076,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.7267680092984423,
+              "n": 73
+            }
+          ],
+          "n": 219,
+          "spearman": -0.656436268252548
+        },
+        "curve_sell_count": {
+          "bootstrap_95pct": [
+            -0.7748340296546449,
+            -0.5400909883654338
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 219,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 4.0,
+            "p90": 19.200000000000017
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.7846125661918637,
+              "n": 73
+            }
+          ],
+          "n": 219,
+          "spearman": -0.6821691661794859
+        },
+        "top1_buy_recipient_token_share": {
+          "bootstrap_95pct": [
+            0.36313523393184827,
+            0.6186585640788385
+          ],
+          "feature": {
+            "median": 0.6379908564469765,
+            "n": 130,
+            "p10": 0.2761506941165963,
+            "p25": 0.3995218053680181,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 0.7416061808914841,
+              "n": 43
+            },
+            {
+              "median_label_multiple": 0.8341123050906524,
+              "n": 43
+            },
+            {
+              "median_label_multiple": 0.997712467012957,
+              "n": 44
+            }
+          ],
+          "n": 130,
+          "spearman": 0.5168483307838284
+        },
+        "total_directional_event_count": {
+          "bootstrap_95pct": [
+            -0.7772783382431394,
+            -0.5474470365869257
+          ],
+          "feature": {
+            "median": 2.0,
+            "n": 219,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 11.5,
+            "p90": 57.400000000000205
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.9980765661200119,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.7208238324135989,
+              "n": 73
+            }
+          ],
+          "n": 219,
+          "spearman": -0.67780176660066
+        },
+        "unique_buy_recipients": {
+          "bootstrap_95pct": [
+            -0.77099490958331,
+            -0.5527966039010797
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 219,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.0,
+            "p90": 15.200000000000017
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.9998633768424076,
+              "n": 73
+            },
+            {
+              "median_label_multiple": 0.7190980865589365,
+              "n": 73
+            }
+          ],
+          "n": 219,
+          "spearman": -0.6761259790094234
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 219,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 219,
+          "note": "sparse_feature_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 219,
+        "p10": 0.6317727438589946,
+        "p25": 0.8349321184264834,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 86400,
+      "label_price_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 219,
+        "p10": 0.6317727438589946,
+        "p25": 0.8349321184264834,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 319,
+      "minimum_observed_separation_seconds": 85500.0,
+      "minimum_scheduled_separation_seconds": 85500,
+      "split_era_launch_span_days": null,
+      "usable_by_cohort": {
+        "long": 219
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 219
+      },
+      "usable_by_label_market_phase": {
+        "curve": 215,
+        "v4": 4
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 218,
+        "v4_at_cutoff": 1
+      },
+      "usable_n": 219
+    },
+    {
+      "coverage": {
+        "complete": 233,
+        "partial": 69,
+        "unavailable": 34
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 229,
+            "p10": 0.6403143760504464,
+            "p25": 0.8401613673584861,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 229
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 212,
+            "p10": 0.610439968520217,
+            "p25": 0.8379794745944489,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 212
+        },
+        "SPLIT_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 16,
+            "p10": 0.7913458919646961,
+            "p25": 0.8854440250824316,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 1.5,
+          "n": 16
+        },
+        "TRANSITION_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 1,
+            "p10": 1.0,
+            "p25": 1.0,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 0.0,
+          "median_directional_event_count": 0.0,
+          "n": 1
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 228,
+            "p10": 0.6463941451245956,
+            "p25": 0.8405867643193307,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 228
+        },
+        "v4_at_cutoff": {
+          "label_multiple": {
+            "median": 0.04733083964510606,
+            "n": 1,
+            "p10": 0.04733083964510606,
+            "p25": 0.04733083964510606,
+            "p75": 0.04733083964510606,
+            "p90": 0.04733083964510606
+          },
+          "median_curve_buy_count": 2.0,
+          "median_directional_event_count": 159.0,
+          "n": 1
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 229,
+        "feature_finalized_after_label": 4,
+        "flow_partial": 69,
+        "flow_unavailable": 34,
+        "not_mature": 6
+      },
+      "feature_cutoff_seconds": 3600,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "bootstrap_95pct": [
+            -0.7247882177682737,
+            -0.48374997233286626
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 229,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 6.0,
+            "p90": 25.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 76
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 76
+            },
+            {
+              "median_label_multiple": 0.7846125661918637,
+              "n": 77
+            }
+          ],
+          "n": 229,
+          "spearman": -0.625140725124782
+        },
+        "curve_sell_count": {
+          "bootstrap_95pct": [
+            -0.7858628249580127,
+            -0.5581243590573085
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 229,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 6.0,
+            "p90": 21.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 76
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 76
+            },
+            {
+              "median_label_multiple": 0.768447235656767,
+              "n": 77
+            }
+          ],
+          "n": 229,
+          "spearman": -0.6839249143673438
+        },
+        "top1_buy_recipient_token_share": {
+          "bootstrap_95pct": [
+            0.30975086240338706,
+            0.6206846340363077
+          ],
+          "feature": {
+            "median": 0.6133475550227998,
+            "n": 134,
+            "p10": 0.2724554694687323,
+            "p25": 0.3859502614167492,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 0.7765299009243154,
+              "n": 44
+            },
+            {
+              "median_label_multiple": 0.8341123050906524,
+              "n": 45
+            },
+            {
+              "median_label_multiple": 0.9978818496696685,
+              "n": 45
+            }
+          ],
+          "n": 134,
+          "spearman": 0.47929553847053313
+        },
+        "total_directional_event_count": {
+          "bootstrap_95pct": [
+            -0.7782264820431523,
+            -0.5460377159716905
+          ],
+          "feature": {
+            "median": 2.0,
+            "n": 229,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 14.0,
+            "p90": 48.400000000000034
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 76
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 76
+            },
+            {
+              "median_label_multiple": 0.7416061808914841,
+              "n": 77
+            }
+          ],
+          "n": 229,
+          "spearman": -0.6529914700252608
+        },
+        "unique_buy_recipients": {
+          "bootstrap_95pct": [
+            -0.7454594265911788,
+            -0.5422095840814775
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 229,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 6.0,
+            "p90": 16.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 76
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 76
+            },
+            {
+              "median_label_multiple": 0.7473385089986554,
+              "n": 77
+            }
+          ],
+          "n": 229,
+          "spearman": -0.6491562340111443
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 229,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 229,
+          "note": "sparse_feature_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 229,
+        "p10": 0.6403143760504464,
+        "p25": 0.8401613673584861,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 21600,
+      "label_price_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 229,
+        "p10": 0.6403143760504464,
+        "p25": 0.8401613673584861,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 336,
+      "minimum_observed_separation_seconds": 18000.0,
+      "minimum_scheduled_separation_seconds": 18000,
+      "split_era_launch_span_days": 0.7173148148148148,
+      "usable_by_cohort": {
+        "long": 229
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 212,
+        "SPLIT_FLOW_ERA": 16,
+        "TRANSITION_ERA": 1
+      },
+      "usable_by_label_market_phase": {
+        "curve": 226,
+        "v4": 3
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 228,
+        "v4_at_cutoff": 1
+      },
+      "usable_n": 229
+    },
+    {
+      "coverage": {
+        "complete": 217,
+        "partial": 69,
+        "unavailable": 33
+      },
+      "descriptives_by_cohort": {
+        "long": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 217,
+            "p10": 0.6256776651907725,
+            "p25": 0.8357519317623144,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 217
+        }
+      },
+      "descriptives_by_era": {
+        "LEGACY_FLOW_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 216,
+            "p10": 0.6226301258566613,
+            "p25": 0.8353420250943989,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 216
+        },
+        "TRANSITION_ERA": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 1,
+            "p10": 1.0,
+            "p25": 1.0,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 0.0,
+          "median_directional_event_count": 0.0,
+          "n": 1
+        }
+      },
+      "descriptives_by_state_at_cutoff": {
+        "curve_at_cutoff": {
+          "label_multiple": {
+            "median": 1.0,
+            "n": 216,
+            "p10": 0.6393969184792353,
+            "p25": 0.8372633562220472,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "median_curve_buy_count": 1.0,
+          "median_directional_event_count": 2.0,
+          "n": 216
+        },
+        "v4_at_cutoff": {
+          "label_multiple": {
+            "median": 0.04659218460269736,
+            "n": 1,
+            "p10": 0.04659218460269736,
+            "p25": 0.04659218460269736,
+            "p75": 0.04659218460269736,
+            "p90": 0.04659218460269736
+          },
+          "median_curve_buy_count": 2.0,
+          "median_directional_event_count": 159.0,
+          "n": 1
+        }
+      },
+      "exclusive_exclusions": {
+        "eligible": 217,
+        "flow_partial": 69,
+        "flow_unavailable": 33,
+        "not_mature": 23
+      },
+      "feature_cutoff_seconds": 3600,
+      "feature_outcome_screen": {
+        "curve_buy_count": {
+          "bootstrap_95pct": [
+            -0.7749967739039071,
+            -0.5606506277318761
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 217,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 6.0,
+            "p90": 26.200000000000017
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 72
+            },
+            {
+              "median_label_multiple": 0.9999316884212037,
+              "n": 72
+            },
+            {
+              "median_label_multiple": 0.7567224803156347,
+              "n": 73
+            }
+          ],
+          "n": 217,
+          "spearman": -0.6738177464267393
+        },
+        "curve_sell_count": {
+          "bootstrap_95pct": [
+            -0.8400833376700126,
+            -0.5871626158425955
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 217,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 6.0,
+            "p90": 21.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 72
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 72
+            },
+            {
+              "median_label_multiple": 0.7267680092984423,
+              "n": 73
+            }
+          ],
+          "n": 217,
+          "spearman": -0.7110573615819502
+        },
+        "top1_buy_recipient_token_share": {
+          "bootstrap_95pct": [
+            0.39735042103335094,
+            0.6766578151389261
+          ],
+          "feature": {
+            "median": 0.6133475550227998,
+            "n": 128,
+            "p10": 0.2743655579677339,
+            "p25": 0.38695419699413014,
+            "p75": 1.0,
+            "p90": 1.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 0.7345458488569491,
+              "n": 42
+            },
+            {
+              "median_label_multiple": 0.8341123050906524,
+              "n": 43
+            },
+            {
+              "median_label_multiple": 0.9975430843562455,
+              "n": 43
+            }
+          ],
+          "n": 128,
+          "spearman": 0.5416234972010382
+        },
+        "total_directional_event_count": {
+          "bootstrap_95pct": [
+            -0.8027300531995429,
+            -0.5946001636721479
+          ],
+          "feature": {
+            "median": 2.0,
+            "n": 217,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 14.0,
+            "p90": 54.40000000000006
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 72
+            },
+            {
+              "median_label_multiple": 1.0,
+              "n": 72
+            },
+            {
+              "median_label_multiple": 0.7157795724640237,
+              "n": 73
+            }
+          ],
+          "n": 217,
+          "spearman": -0.6983308234186617
+        },
+        "unique_buy_recipients": {
+          "bootstrap_95pct": [
+            -0.7813859225447616,
+            -0.5861816091308263
+          ],
+          "feature": {
+            "median": 1.0,
+            "n": 217,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 5.0,
+            "p90": 16.0
+          },
+          "feature_terciles": [
+            {
+              "median_label_multiple": 1.0,
+              "n": 72
+            },
+            {
+              "median_label_multiple": 0.9999819247312457,
+              "n": 72
+            },
+            {
+              "median_label_multiple": 0.7208238324135989,
+              "n": 73
+            }
+          ],
+          "n": 217,
+          "spearman": -0.696603572779288
+        },
+        "v4_core_swap_count": {
+          "feature": {
+            "median": 0.0,
+            "n": 217,
+            "p10": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p90": 0.0
+          },
+          "n": 217,
+          "note": "sparse_feature_no_correlation"
+        }
+      },
+      "label_fdv_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 217,
+        "p10": 0.6256776651907725,
+        "p25": 0.8357519317623144,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "label_horizon_seconds": 86400,
+      "label_price_multiple_t0_to_h": {
+        "median": 1.0,
+        "n": 217,
+        "p10": 0.6256776651907725,
+        "p25": 0.8357519317623144,
+        "p75": 1.0,
+        "p90": 1.0
+      },
+      "mature_denominator": 319,
+      "minimum_observed_separation_seconds": 82800.0,
+      "minimum_scheduled_separation_seconds": 82800,
+      "split_era_launch_span_days": null,
+      "usable_by_cohort": {
+        "long": 217
+      },
+      "usable_by_era": {
+        "LEGACY_FLOW_ERA": 216,
+        "TRANSITION_ERA": 1
+      },
+      "usable_by_label_market_phase": {
+        "curve": 214,
+        "v4": 3
+      },
+      "usable_by_state_at_cutoff": {
+        "curve_at_cutoff": 216,
+        "v4_at_cutoff": 1
+      },
+      "usable_n": 217
+    }
+  ],
+  "predictor_allowlist": [
+    "curve_buy_count",
+    "curve_sell_count",
+    "total_directional_event_count",
+    "v4_core_swap_count",
+    "unique_buy_recipients",
+    "top1_buy_recipient_token_share"
+  ],
+  "quality_era_boundary": {
+    "legacy_end_utc": "2026-09-27T17:38:23.866288+00:00",
+    "split_start_block": 74123713,
+    "split_start_utc": "2026-09-27T17:39:04.824785+00:00"
+  },
+  "selection_bias_60s": [
+    {
+      "cohort": "initial_only",
+      "era": "LEGACY_FLOW_ERA",
+      "median_raw_event_count_60s": 1.0,
+      "median_utc_launch_hour": 11.194722222222222,
+      "n": 214,
+      "quality": "complete",
+      "state_at_cutoff": "curve_at_cutoff"
+    },
+    {
+      "cohort": "long",
+      "era": "LEGACY_FLOW_ERA",
+      "median_raw_event_count_60s": 1.0,
+      "median_utc_launch_hour": 9.576666666666666,
+      "n": 221,
+      "quality": "complete",
+      "state_at_cutoff": "curve_at_cutoff"
+    },
+    {
+      "cohort": "long",
+      "era": "LEGACY_FLOW_ERA",
+      "median_raw_event_count_60s": 186.0,
+      "median_utc_launch_hour": 16.2575,
+      "n": 1,
+      "quality": "complete",
+      "state_at_cutoff": "v4_at_cutoff"
+    },
+    {
+      "cohort": "initial_only",
+      "era": "SPLIT_FLOW_ERA",
+      "median_raw_event_count_60s": 1.0,
+      "median_utc_launch_hour": 14.177777777777777,
+      "n": 38,
+      "quality": "complete",
+      "state_at_cutoff": "curve_at_cutoff"
+    },
+    {
+      "cohort": "long",
+      "era": "SPLIT_FLOW_ERA",
+      "median_raw_event_count_60s": 1.0,
+      "median_utc_launch_hour": 10.371666666666666,
+      "n": 21,
+      "quality": "complete",
+      "state_at_cutoff": "curve_at_cutoff"
+    },
+    {
+      "cohort": "initial_only",
+      "era": "LEGACY_FLOW_ERA",
+      "median_raw_event_count_60s": 5.0,
+      "median_utc_launch_hour": 18.095694444444444,
+      "n": 44,
+      "quality": "partial",
+      "state_at_cutoff": "curve_at_cutoff"
+    },
+    {
+      "cohort": "initial_only",
+      "era": "LEGACY_FLOW_ERA",
+      "median_raw_event_count_60s": 486.0,
+      "median_utc_launch_hour": 15.94361111111111,
+      "n": 1,
+      "quality": "partial",
+      "state_at_cutoff": "v4_at_cutoff"
+    },
+    {
+      "cohort": "long",
+      "era": "LEGACY_FLOW_ERA",
+      "median_raw_event_count_60s": 6.0,
+      "median_utc_launch_hour": 19.605833333333333,
+      "n": 49,
+      "quality": "partial",
+      "state_at_cutoff": "curve_at_cutoff"
+    },
+    {
+      "cohort": "long",
+      "era": "LEGACY_FLOW_ERA",
+      "median_raw_event_count_60s": 516.0,
+      "median_utc_launch_hour": 0.8436111111111111,
+      "n": 1,
+      "quality": "partial",
+      "state_at_cutoff": "v4_at_cutoff"
+    },
+    {
+      "cohort": "long",
+      "era": "SPLIT_FLOW_ERA",
+      "median_raw_event_count_60s": 81.0,
+      "median_utc_launch_hour": 16.621666666666666,
+      "n": 1,
+      "quality": "partial",
+      "state_at_cutoff": "curve_at_cutoff"
+    },
+    {
+      "cohort": "initial_only",
+      "era": "LEGACY_FLOW_ERA",
+      "median_raw_event_count_60s": 0.0,
+      "median_utc_launch_hour": 16.35333333333333,
+      "n": 48,
+      "quality": "unavailable",
+      "state_at_cutoff": "curve_at_cutoff"
+    },
+    {
+      "cohort": "long",
+      "era": "LEGACY_FLOW_ERA",
+      "median_raw_event_count_60s": 0.0,
+      "median_utc_launch_hour": 19.95916666666667,
+      "n": 47,
+      "quality": "unavailable",
+      "state_at_cutoff": "curve_at_cutoff"
+    },
+    {
+      "cohort": "long",
+      "era": "SPLIT_FLOW_ERA",
+      "median_raw_event_count_60s": 0.0,
+      "median_utc_launch_hour": 4.253055555555555,
+      "n": 1,
+      "quality": "unavailable",
+      "state_at_cutoff": "curve_at_cutoff"
+    }
+  ],
+  "session_id": "1eb525a3fe2a41b2bab1b5bf8dca4a9a"
+}
