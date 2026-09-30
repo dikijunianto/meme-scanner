@@ -38,12 +38,13 @@ def verified_checkout(root=ROOT):
 
 class ShadowRpc(FlowRpc):
     """Account every Validation attempt before sending; share the 400/day guard."""
-    def __init__(self, config, settings, db, providers):
+    def __init__(self, config, settings, db, providers, reserve=CUTOVER_RESERVE):
         super().__init__(config, replace(settings,split_enabled=True), db, providers)
         if provider(self.config.rpc_http) != 'validation':
             raise ValueError('Shadow RPC must be Validation HTTP')
         self.job = None
         self.attempt = 0
+        self.reserve = reserve
 
     def add(self, metric, n=1):
         super().add(metric, n)
@@ -65,7 +66,7 @@ class ShadowRpc(FlowRpc):
                 raise FlowBudget('Shadow daily HTTP budget exhausted')
             if self.db.used('flow_rpc_members', minute) + n > self.settings.minute_calls:
                 raise FlowBudget('Shadow minute HTTP budget exhausted')
-            if logs and self.db.used('flow_eth_getLogs', day) + logs > self.settings.daily_getlogs - CUTOVER_RESERVE:
+            if logs and self.db.used('flow_eth_getLogs', day) + logs > self.settings.daily_getlogs - self.reserve:
                 raise FlowBudget('Shadow getLogs reserve reached')
             self.attempt += 1
             metrics = [('flow_rpc_members', n), ('flow_http_calls', 1),
@@ -74,6 +75,8 @@ class ShadowRpc(FlowRpc):
             if logs:
                 metrics += [('flow_eth_getLogs_validation', logs),
                             ('flow_shadow_eth_getLogs_validation', logs)]
+                if self.job and self.job[0].startswith('live_graduation:'):
+                    metrics.append(('flow_graduated_bootstrap_getlogs',logs))
             for item in members:
                 metrics.append(('flow_' + item['method'], 1))
             for name, count in metrics:
@@ -91,11 +94,11 @@ class ShadowRpc(FlowRpc):
 
 
 class ShadowReconciler:
-    def __init__(self, worker, session_id=None):
+    def __init__(self, worker, session_id=None, reserve=CUTOVER_RESERVE):
         self.worker = worker
         self.db = worker.db
         self.session_id = session_id
-        self.worker.rpc = ShadowRpc(worker.config, worker.settings, self.db, worker.providers)
+        self.worker.rpc = ShadowRpc(worker.config, worker.settings, self.db, worker.providers, reserve)
         self._schema()
 
     def stage(self, name):
@@ -253,6 +256,7 @@ class ShadowReconciler:
         raise RpcError('Shadow target filter changed')
 
     async def run_stage(self, stage):
+        self.pause_scope = None
         if self.session_id and (not (current:=active_cutover(self.db)) or current['id']!=self.session_id):
             raise RpcError('Cutover session changed before proof')
         scoped=self.stage(stage)
@@ -282,6 +286,9 @@ class ShadowReconciler:
                           (span,current,end,*key))
                     continue
                 except FlowBudget as exc:
+                    self.pause_scope = exc.scope
+                    if stage.startswith('live_graduation:'):
+                        return False
                     if 'minute' in str(exc):
                         if getattr(self.worker,'connected',False):self.worker.drain()
                         await asyncio.sleep(60-time.time()%60+.05)

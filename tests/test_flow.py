@@ -293,6 +293,11 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
     async def test_graduated_target_recovers_curve_and_both_pool_filters(self):
         base=self.t['launch_block'];g=fixture('v4_buy')['launch'];g['block_number']=base+20;g['log_index']=3
         with self.db.conn:self.db.conn.execute('UPDATE flow_tracking_targets SET graduation_json=? WHERE launch_id=1',(json.dumps(g),))
+        with self.assertRaisesRegex(RpcError,'explicit bootstrap'):
+            self.worker.recovery_plan(self.db.target(1),base+30)
+        for kind in ('v4','hook'):
+            self.db.require_bootstrap(self.db.target(1),kind,base+20)
+            self.db.complete_bootstrap(1,kind,base+20)
         plans=self.worker.recovery_plan(self.db.target(1),base+30)
         self.assertEqual({p[1]:(p[4],p[5]) for p in plans},
                          {'curve':(base,base+20),'v4':(base+20,base+30),'hook':(base+20,base+30)})

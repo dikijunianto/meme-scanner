@@ -2,8 +2,9 @@ import copy
 from dataclasses import replace
 from pathlib import Path
 import tempfile
+import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.config import Config
 from app.flow_bootstrap import CursorBootstrap
@@ -155,3 +156,113 @@ class BootstrapTests(unittest.IsolatedAsyncioTestCase):
                           'hook':(self.base+20,self.base+30)})
         self.assertEqual({r[0] for r in self.db.conn.execute('SELECT kind FROM flow_bootstrap WHERE status="complete"')},
                          {'curve','v4','hook'})
+
+    async def test_live_graduation_over_100_blocks_proves_only_new_filters(self):
+        import json
+        g=fixture('v4_buy')['launch'];g['block_number']=self.base+20
+        with self.db.conn:
+            self.db.conn.execute('UPDATE flow_tracking_targets SET graduation_json=?,tracking_end_at=? WHERE launch_id=1',
+                                 (json.dumps(g),time.time()+3600))
+        self.db.require_bootstrap(self.db.target(1),'curve',self.base)
+        self.db.complete_bootstrap(1,'curve',self.base+20)
+        for kind in ('v4','hook'):
+            self.db.require_bootstrap(self.db.target(1),kind,self.base+20)
+        with self.assertRaisesRegex(RpcError,'explicit bootstrap'):
+            self.runner.worker.recovery_plan(self.db.target(1),self.base+423)
+        calls=self.rpc(self.base+423)
+        complete=await self.runner.worker.bootstrap_graduated(self.db.target(1))
+        self.assertTrue(complete)
+        self.assertEqual(calls,[(self.base+20,self.base+423)]*2)
+        self.assertEqual(self.db.state('recovery:1:v4'),str(self.base+423))
+        self.assertEqual(self.db.state('recovery:1:hook'),str(self.base+423))
+        self.assertEqual(self.db.state('recovery:1:curve'),str(self.base+20))
+        self.assertEqual({r[0] for r in self.db.conn.execute("SELECT kind FROM flow_bootstrap WHERE status='complete'")},
+                         {'curve','v4','hook'})
+        self.assertEqual(self.db.conn.execute("SELECT count(*) FROM flow_gaps WHERE resolved=0").fetchone()[0],0)
+        self.assertEqual(self.db.used('flow_eth_getTransactionReceipt',0),0)
+        self.assertEqual(self.db.used('flow_eth_getTransactionByHash',0),0)
+        self.assertEqual(self.db.used('flow_http_calls_alchemy',0),0)
+
+    async def test_live_graduation_budget_wait_holds_null_cursors_and_resumes(self):
+        import json
+        g=fixture('v4_buy')['launch'];g['block_number']=self.base+20
+        with self.db.conn:
+            self.db.conn.execute('UPDATE flow_tracking_targets SET graduation_json=?,tracking_end_at=? WHERE launch_id=1',
+                                 (json.dumps(g),time.time()+3600))
+        for kind in ('v4','hook'):
+            self.db.require_bootstrap(self.db.target(1),kind,self.base+20)
+        self.settings.daily_getlogs=0
+        calls=self.rpc(self.base+423)
+        self.assertFalse(await self.runner.worker.bootstrap_graduated(self.db.target(1)))
+        self.assertEqual(calls,[])
+        self.assertIsNone(self.db.state('recovery:1:v4'))
+        self.assertIsNone(self.db.state('recovery:1:hook'))
+        self.assertEqual(self.db.used('flow_graduated_bootstrap_budget_waits',0),1)
+        self.assertEqual(self.db.conn.execute("SELECT count(*) FROM flow_gaps WHERE reason='reconnect_recovery_incomplete'").fetchone()[0],0)
+        self.settings.daily_getlogs=400
+        self.assertTrue(await self.runner.worker.bootstrap_graduated(self.db.target(1)))
+        self.assertEqual(calls,[(self.base+20,self.base+423)]*2)
+        self.assertEqual(self.db.conn.execute("SELECT count(*) FROM flow_shadow_ranges WHERE stage='live_graduation:1'").fetchone()[0],2)
+
+    async def test_live_graduation_failed_second_chunk_resumes_from_proved_range(self):
+        import json
+        g=fixture('v4_buy')['launch'];g['block_number']=self.base+20
+        with self.db.conn:
+            self.db.conn.execute('UPDATE flow_tracking_targets SET graduation_json=?,tracking_end_at=? WHERE launch_id=1',
+                                 (json.dumps(g),time.time()+3600))
+        for kind in ('v4','hook'):
+            self.db.require_bootstrap(self.db.target(1),kind,self.base+20)
+        first_calls=self.rpc(self.base+3020,fail_from=self.base+2020)
+        self.assertFalse(await self.runner.worker.bootstrap_graduated(self.db.target(1)))
+        self.assertEqual(first_calls,[(self.base+20,self.base+2019),(self.base+2020,self.base+3020)])
+        self.assertIsNone(self.db.state('recovery:1:hook'))
+        self.assertEqual(self.db.conn.execute("SELECT next_unverified_block FROM flow_shadow_jobs WHERE stage='live_graduation:1' AND kind='hook'").fetchone()[0],self.base+2020)
+        resumed_calls=self.rpc(self.base+3020)
+        self.assertTrue(await self.runner.worker.bootstrap_graduated(self.db.target(1)))
+        self.assertEqual(resumed_calls,[(self.base+2020,self.base+3020),
+                                        (self.base+20,self.base+2019),(self.base+2020,self.base+3020)])
+        self.assertEqual(self.db.state('recovery:1:v4'),str(self.base+3020))
+        self.assertEqual(self.db.state('recovery:1:hook'),str(self.base+3020))
+
+    async def test_expired_live_graduation_keeps_proof_pending_without_cursor(self):
+        import json
+        g=fixture('v4_buy')['launch'];g['block_number']=self.base+20
+        with self.db.conn:
+            self.db.conn.execute('UPDATE flow_tracking_targets SET graduation_json=? WHERE launch_id=1',(json.dumps(g),))
+        for kind in ('v4','hook'):
+            self.db.require_bootstrap(self.db.target(1),kind,self.base+20)
+        self.rpc(self.base+30)
+        result=await self.bootstrap.run('live_graduation:1',[1],{'v4','hook'},active_only=True)
+        self.assertEqual(result['gate'],'MISSING_CURSOR_BOOTSTRAP_PENDING')
+        self.assertTrue(result['expired_incomplete'])
+        self.assertIsNone(self.db.state('recovery:1:v4'))
+        self.assertIsNone(self.db.state('recovery:1:hook'))
+        self.runner.worker.discover=AsyncMock()
+        await self.runner.worker.reconcile()
+        self.assertEqual(self.db.target(1)['status'],'partial')
+        self.assertEqual(self.db.used('flow_graduated_bootstrap_expired_incomplete',0),1)
+
+    async def test_reconcile_routes_new_graduated_filters_around_normal_guard(self):
+        g=fixture('v4_buy')['launch'];g['block_number']=self.base+20
+        g['token_address']=self.t['token_address']
+        existing={'token_address','block_number','log_index'}
+        for key in g.keys()-existing:
+            self.main.execute(f'ALTER TABLE graduations ADD COLUMN {key} TEXT')
+        self.main.execute('INSERT INTO graduations('+','.join(g)+') VALUES('+','.join('?' for _ in g)+')',tuple(g.values()))
+        self.main.commit()
+        with self.db.conn:
+            self.db.conn.execute('UPDATE flow_tracking_targets SET tracking_end_at=? WHERE launch_id=1',
+                                 (time.time()+3600,))
+        self.db.require_bootstrap(self.db.target(1),'curve',self.base)
+        self.db.complete_bootstrap(1,'curve',self.base+20)
+        worker=self.runner.worker
+        worker.subscriptions[(1,'curve')]='old'
+        worker.command=AsyncMock(side_effect=['swap','hook',True])
+        worker.discover=AsyncMock()
+        calls=self.rpc(self.base+423)
+        await worker.reconcile()
+        self.assertEqual(calls,[(self.base+20,self.base+423)]*2)
+        self.assertEqual(self.db.state('recovery:1:v4'),str(self.base+423))
+        self.assertEqual(self.db.state('recovery:1:hook'),str(self.base+423))
+        self.assertNotEqual(self.db.state('service_status'),'unrecoverable_gap')
+        self.assertEqual(self.db.conn.execute("SELECT count(*) FROM flow_gaps WHERE resolved=0").fetchone()[0],0)

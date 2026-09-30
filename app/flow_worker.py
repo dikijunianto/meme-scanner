@@ -160,6 +160,7 @@ class FlowWorker:
         self.ws_provider='publicnode' if settings.split_enabled else 'alchemy'
         self.pending_recovery=set()
         self.recovery_heads={};self.blocked_recovery={};self.recovery_wait_until=0;self.connection_started_at=0
+        self.bootstrap_retry_at={}
         self.connection_id=None;self.subscription_ready_at=None;self.switch_retry_at=0
 
     def cutover_tick(self, targets):
@@ -253,6 +254,8 @@ class FlowWorker:
             key=f'recovery:{t["launch_id"]}:{kind}'
             persisted=self.db.state(key)
             if persisted is not None and int(persisted)>last+2:raise RpcError('Recovery cursor is ahead of validated head')
+            if kind in ('v4','hook') and persisted is None:
+                raise RpcError('Graduated filter requires explicit bootstrap')
             if kind=='curve' and g and persisted is not None and int(persisted)>=end:continue
             start=max(bases[kind],int(persisted)-2) if persisted is not None else bases[kind]
             if end>=start:
@@ -263,6 +266,8 @@ class FlowWorker:
     async def recover_plans(self,plans):
         for t,kind,query,key,first,last in plans:
             bootstrapping=self.db.state(key) is None
+            if bootstrapping and kind in ('v4','hook'):
+                raise RpcError('Graduated filter requires explicit bootstrap')
             if bootstrapping:
                 g=json.loads(t['graduation_json']) if t['graduation_json'] else None
                 base=g['block_number'] if g and kind!='curve' else t['launch_block']
@@ -362,6 +367,29 @@ class FlowWorker:
             base=graduation['block_number'] if graduation and kind!='curve' else t['launch_block']
             self.db.require_bootstrap(t,kind,base)
         if graduation:self.db.require_bootstrap(t,'curve',t['launch_block'])
+
+    async def bootstrap_graduated(self,t):
+        missing={kind for kind in ('v4','hook')
+                 if self.db.state(f'recovery:{t["launch_id"]}:{kind}') is None}
+        if not t['graduation_json'] or not missing:return True
+        from app.flow_bootstrap import CursorBootstrap
+        from app.flow_shadow import ShadowReconciler
+        original_rpc=self.rpc
+        runner=ShadowReconciler(self,reserve=0)
+        try:
+            self.db.count('flow_graduated_bootstrap_attempts')
+            result=await CursorBootstrap(runner).run(
+                f'live_graduation:{t["launch_id"]}',[t['launch_id']],missing,active_only=True)
+        finally:
+            shadow_rpc=self.rpc;self.rpc=original_rpc
+            await shadow_rpc.close()
+        if result['pause_scope']:self.db.count('flow_graduated_bootstrap_budget_waits')
+        if result['gate']=='BOOTSTRAP_PROOF_COMPLETE':
+            self.db.count('flow_graduated_bootstrap_completed',len(missing))
+            self.dirty.add(t['launch_id'])
+            return True
+        self.db.set_state('service_status','bootstrap_required')
+        return False
 
     def recovery_fingerprint(self,t):
         return tuple((kind,self.db.state(f'recovery:{t["launch_id"]}:{kind}')) for kind in sorted(self.filters(t)))
@@ -471,8 +499,11 @@ class FlowWorker:
         now=time.time()
         # Expiry is independent of HTTP availability or discovery success.
         for t in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE tracking_end_at+10<? AND status NOT IN ('completed','partial')",(now,)).fetchall():
+            if t['graduation_json'] and self.db.conn.execute("SELECT 1 FROM flow_bootstrap WHERE launch_id=? AND kind IN ('v4','hook') AND status!='complete' LIMIT 1",(t['launch_id'],)).fetchone():
+                self.db.count('flow_graduated_bootstrap_expired_incomplete')
             self.pending_recovery.discard(t['launch_id']);self.recovery_heads.pop(t['launch_id'],None)
             self.blocked_recovery.pop(t['launch_id'],None)
+            self.bootstrap_retry_at.pop(t['launch_id'],None)
             for key,sub in list(self.subscriptions.items()):
                 if key[0]==t['launch_id']:
                     await self.command('eth_unsubscribe',[sub]);del self.subscriptions[key]
@@ -494,6 +525,7 @@ class FlowWorker:
                 g=dict(grad)
                 with self.db.conn:self.db.conn.execute("UPDATE flow_tracking_targets SET graduation_json=?,pool_id=?,current_phase='v4' WHERE launch_id=?",(json.dumps(g),g['pool_id'],t['launch_id']))
                 t=self.db.target(t['launch_id'])
+                self.db.count('flow_graduated_filters_activated',2)
             self.ensure_bootstrap_state(t)
             try:new=await self.subscribe(t)
             except FlowBudget:
@@ -535,6 +567,20 @@ class FlowWorker:
                 return
             for t in recovery:
                 launch=t['launch_id']
+                if t['graduation_json'] and any(self.db.state(f'recovery:{launch}:{kind}') is None
+                                                for kind in ('v4','hook')):
+                    if time.time()<self.bootstrap_retry_at.get(launch,0):continue
+                    try:complete=await self.bootstrap_graduated(t)
+                    except FlowBudget:
+                        self.db.count('flow_graduated_bootstrap_budget_waits')
+                        self.db.set_state('service_status','bootstrap_required')
+                        self.bootstrap_retry_at[launch]=time.time()+30
+                        continue
+                    if complete:
+                        self.recovery_heads.pop(launch,None)
+                        self.bootstrap_retry_at.pop(launch,None)
+                    else:self.bootstrap_retry_at[launch]=time.time()+30
+                    continue
                 fingerprint=self.recovery_fingerprint(t)
                 if self.blocked_recovery.get(launch)==fingerprint:continue
                 try:

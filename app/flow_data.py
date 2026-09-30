@@ -31,6 +31,25 @@ def iso(value):
     return (datetime(1970,1,1,tzinfo=timezone.utc)+timedelta(seconds=value)).isoformat()
 
 
+def required_filter_intervals(target, cutoff):
+    """The curve ends at the graduation log; pool filters begin after it."""
+    start=target['tracking_start_at']
+    graduation=json.loads(target['graduation_json']) if target['graduation_json'] else None
+    if not graduation or stamp(graduation['block_timestamp'])>cutoff:
+        return [{'kind':'curve','start_at':start,'end_at':cutoff,
+                 'safe_start_block':target['launch_block'],'address':target['curve_address'].lower()}]
+    at=stamp(graduation['block_timestamp'])
+    boundary=[graduation['block_number'],graduation['log_index']]
+    return [
+        {'kind':'curve','start_at':start,'end_at':at,
+         'safe_start_block':target['launch_block'],'address':target['curve_address'].lower(),
+         'end_before_position':boundary},
+        *({'kind':kind,'start_at':at,'end_at':cutoff,
+           'safe_start_block':graduation['block_number'],'address':graduation[address].lower(),
+           'pool_id':graduation['pool_id'].lower(),'start_after_position':boundary}
+          for kind,address in (('v4','pool_manager_address'),('hook','hooks')))]
+
+
 def normalized(value, decimals):
     with localcontext() as ctx:
         ctx.prec = 90
@@ -222,21 +241,22 @@ class FlowDB:
         metrics=json.loads(row['metrics'])
         payload=json.dumps({k:metrics.get(k) for k in PIT_METRICS},sort_keys=True,separators=(',',':'))
         payload_hash=hashlib.sha256(payload.encode()).hexdigest()
-        graduation=json.loads(target['graduation_json']) if target['graduation_json'] else None
-        kinds=('curve','v4','hook') if graduation and stamp(graduation['block_timestamp'])<=row['feature_cutoff_at'] else ('curve',)
+        intervals=required_filter_intervals(target,row['feature_cutoff_at'])
+        filter_hash=hashlib.sha256(json.dumps(intervals,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         proof=[]
-        for kind in kinds:
+        for interval in intervals:
+            kind=interval['kind']
             bootstrap=self.conn.execute('SELECT status,completed_head,completed_at FROM flow_bootstrap WHERE launch_id=? AND kind=?',
                                         (launch,kind)).fetchone()
             cursor=self.state(f'recovery:{launch}:{kind}')
-            proof.append({'kind':kind,'bootstrap_status':bootstrap['status'] if bootstrap else None,
+            proof.append({**interval,'bootstrap_status':bootstrap['status'] if bootstrap else None,
                           'completed_head':bootstrap['completed_head'] if bootstrap else None,
                           'completed_at':bootstrap['completed_at'] if bootstrap else None,
                           'cursor':int(cursor) if cursor is not None else None})
         ready=(row['coverage_quality']=='complete' and
                all(p['bootstrap_status']=='complete' and p['cursor'] is not None for p in proof))
         semantic=json.dumps((FEATURE_SCHEMA_VERSION,payload_hash,row['coverage_quality'],
-                             row['coverage_reason'],ready),separators=(',',':'))
+                             row['coverage_reason'],ready,filter_hash),separators=(',',':'))
         semantic_hash=hashlib.sha256(semantic.encode()).hexdigest()
         prior=self.conn.execute('''SELECT version_number,semantic_sha256,payload_sha256,coverage_quality,
                                         coverage_reason,model_eligible_at
@@ -256,6 +276,8 @@ class FlowDB:
         proved=at if ready else None
         evidence={'window_end_at':row['feature_cutoff_at'],'coverage_start_at':row['coverage_start_at'],
                   'coverage_end_at':row['coverage_end_at'],'filters':proof,
+                  'lifecycle_state_at_cutoff':'graduated' if len(intervals)>1 else 'curve',
+                  'required_filter_set_hash':filter_hash,
                   'proof_source':'existing_bootstrap_and_recovery_cursors' if ready else 'incomplete_or_unknown'}
         self.conn.execute('''INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                           (launch,window,1+(prior['version_number'] if prior else 0),FEATURE_SCHEMA_VERSION,
@@ -278,9 +300,9 @@ class FlowDB:
                               (launch,kind,safe_start,'required',None,time.time(),None))
             self.conn.execute('INSERT INTO flow_gaps(launch_id,start_at,end_at,reason,first_block) VALUES(?,?,?,?,?)',
                               (launch,at,at,f'bootstrap_required:{kind}',safe_start))
-            self.conn.execute("UPDATE flow_features SET coverage_quality='partial',coverage_reason=? WHERE launch_id=?",
-                              (f'bootstrap_required:{kind}',launch))
-            for feature in self.conn.execute('SELECT * FROM flow_features WHERE launch_id=?',(launch,)):
+            self.conn.execute("UPDATE flow_features SET coverage_quality='partial',coverage_reason=? WHERE launch_id=? AND feature_cutoff_at>=?",
+                              (f'bootstrap_required:{kind}',launch,at))
+            for feature in self.conn.execute('SELECT * FROM flow_features WHERE launch_id=? AND feature_cutoff_at>=?',(launch,at)):
                 self._append_feature_version(target,feature,f'bootstrap_required:{kind}')
         return True
 
@@ -387,8 +409,12 @@ class FlowDB:
             gaps=self.conn.execute('SELECT reason FROM flow_gaps WHERE launch_id=? AND start_at<=? AND end_at>=? AND resolved=0',
                     (target['launch_id'],end,target['tracking_start_at'])).fetchall()
             reasons=sorted({r[0] for r in gaps})
-            if self.conn.execute("SELECT 1 FROM flow_bootstrap WHERE launch_id=? AND status!='complete' LIMIT 1",
-                                 (target['launch_id'],)).fetchone():reasons.append('bootstrap_required')
+            intervals=required_filter_intervals(target,end)
+            states=(self.conn.execute('SELECT status FROM flow_bootstrap WHERE launch_id=? AND kind=?',
+                                      (target['launch_id'],interval['kind'])).fetchone() for interval in intervals)
+            if any((state is None and len(intervals)>1) or
+                   (state is not None and state['status']!='complete') for state in states):
+                reasons.append('bootstrap_required')
             if target['coverage_start_at'] is None or target['coverage_start_at']>target['tracking_start_at']:reasons.append('service_started_late')
             if target['coverage_end_at'] is None or target['coverage_end_at']<end:reasons.append('coverage_not_confirmed')
             quality='partial' if reasons else 'complete'

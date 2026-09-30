@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from app.flow_data import FlowDB, decode_event
-from tests.test_flow import target, insert_target, event
+from app.flow_data import FlowDB, decode_event, iso, required_filter_intervals
+from tests.test_flow import target, insert_target, event, fixture
 
 
 class PitLedgerTests(unittest.TestCase):
@@ -119,3 +119,68 @@ class PitLedgerTests(unittest.TestCase):
         self.assertIsNone(first['model_eligible_at'])
         self.assertEqual(later['model_eligible_at'],1040)
         self.assertEqual(later['feature_schema_version'],'v1')
+
+    def test_graduation_after_cutoff_preserves_first_eligible_and_requires_spanning_proof(self):
+        self.db.activate_pit_ledger(self.revision,now=900)
+        self.db.require_bootstrap(self.t,'curve',self.t['launch_block'])
+        self.db.complete_bootstrap(1,'curve',self.t['launch_block']+20)
+        raw=event(self.t,at=1010,index=1)
+        self.db.store(self.t,raw,decode_event(raw,self.t),observed=1020)
+        with patch('app.flow_data.time.time',return_value=1033):
+            self.db.rebuild(self.db.target(1),1030)
+        first=dict(self.db.conn.execute('SELECT * FROM flow_feature_versions WHERE window_seconds=30').fetchone())
+        self.assertEqual(first['model_eligible_at'],1033)
+        g=fixture('v4_buy')['launch'];g['block_timestamp']=iso(1045)
+        g['block_number']=self.t['launch_block']+20
+        with self.db.conn:
+            self.db.conn.execute('UPDATE flow_tracking_targets SET graduation_json=? WHERE launch_id=1',(json.dumps(g),))
+        for kind in ('v4','hook'):
+            self.db.require_bootstrap(self.db.target(1),kind,g['block_number'])
+        self.assertEqual(self.db.conn.execute('SELECT coverage_quality FROM flow_features WHERE window_seconds=30').fetchone()[0],'complete')
+        with patch('app.flow_data.time.time',return_value=1063):
+            self.db.rebuild(self.db.target(1),1060)
+        partial=self.db.conn.execute('SELECT * FROM flow_feature_versions WHERE window_seconds=60').fetchone()
+        self.assertEqual(partial['coverage_quality'],'partial')
+        self.assertIsNone(partial['model_eligible_at'])
+        proof=json.loads(partial['proof_json'])
+        self.assertEqual(proof['lifecycle_state_at_cutoff'],'graduated')
+        self.assertEqual([(f['kind'],f['start_at'],f['end_at']) for f in proof['filters']],
+                         [('curve',1000,1045),('v4',1045,1060),('hook',1045,1060)])
+        for kind in ('v4','hook'):
+            self.db.complete_bootstrap(1,kind,g['block_number']+30)
+        with patch('app.flow_data.time.time',return_value=1070):
+            self.db.rebuild(self.db.target(1),1067)
+        later=self.db.conn.execute('SELECT * FROM flow_feature_versions WHERE window_seconds=60 AND version_number=2').fetchone()
+        self.assertEqual(later['coverage_quality'],'complete')
+        self.assertEqual(later['model_eligible_at'],1070)
+        self.assertEqual(dict(self.db.conn.execute('SELECT * FROM flow_feature_versions WHERE window_seconds=30 AND version_number=1').fetchone()),first)
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_feature_versions WHERE window_seconds=30').fetchone()[0],1)
+        self.assertNotIn('graduation',first['payload'])
+        self.assertEqual(json.loads(first['proof_json'])['lifecycle_state_at_cutoff'],'curve')
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_feature_versions WHERE window_seconds=60').fetchone()[0],2)
+        self.assertEqual(json.loads(later['proof_json'])['required_filter_set_hash'],
+                         json.loads(partial['proof_json'])['required_filter_set_hash'])
+
+    def test_graduation_at_cutoff_requires_pool_proof_and_filter_identity_is_stable(self):
+        self.db.activate_pit_ledger(self.revision,now=900)
+        self.db.require_bootstrap(self.t,'curve',self.t['launch_block'])
+        self.db.complete_bootstrap(1,'curve',self.t['launch_block']+20)
+        g=fixture('v4_buy')['launch'];g['block_timestamp']=iso(1030)
+        g['block_number']=self.t['launch_block']+20
+        with self.db.conn:
+            self.db.conn.execute('UPDATE flow_tracking_targets SET graduation_json=? WHERE launch_id=1',(json.dumps(g),))
+        for kind in ('v4','hook'):
+            self.db.require_bootstrap(self.db.target(1),kind,g['block_number'])
+        self.db.rebuild(self.db.target(1),1033)
+        first=self.db.conn.execute('SELECT * FROM flow_feature_versions WHERE window_seconds=30').fetchone()
+        self.assertIsNone(first['model_eligible_at'])
+        intervals=required_filter_intervals(self.db.target(1),1030)
+        self.assertEqual([(i['kind'],i['start_at'],i['end_at']) for i in intervals],
+                         [('curve',1000,1030),('v4',1030,1030),('hook',1030,1030)])
+        proof=json.loads(first['proof_json'])
+        self.assertEqual(proof['filters'][0]['end_before_position'],
+                         proof['filters'][1]['start_after_position'])
+        self.db.rebuild(self.db.target(1),1034)
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_feature_versions WHERE window_seconds=30').fetchone()[0],1)
+        self.assertEqual(json.loads(first['proof_json'])['required_filter_set_hash'],
+                         json.loads(self.db.conn.execute('SELECT proof_json FROM flow_feature_versions WHERE window_seconds=30').fetchone()[0])['required_filter_set_hash'])

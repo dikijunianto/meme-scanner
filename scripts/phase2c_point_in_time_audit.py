@@ -303,12 +303,19 @@ def ledger_audit(db,as_of):
         return {'boundary':None,'launches':0,'complete_windows':0,'first_eligible_versions':0,
                 'usable_by_pair':{},'days_of_history':0,'model_readiness':chronological_readiness([],True)}
     versions={}
-    for r in db.execute('''SELECT v.*,t.tracking_start_at FROM flow.flow_feature_versions v
+    for r in db.execute('''SELECT v.*,t.tracking_start_at,t.graduation_json FROM flow.flow_feature_versions v
         JOIN flow.flow_tracking_targets t USING(launch_id)
         WHERE t.tracking_start_at>=? AND v.materialized_at<=? AND v.feature_schema_version='v1'
         ORDER BY v.launch_id,v.window_seconds,v.version_number''',(start['start_at'],as_of)):
         key=(r['launch_id'],r['window_seconds'])
         if key not in versions and r['coverage_quality']=='complete' and r['model_eligible_at'] is not None and r['model_eligible_at']<=as_of:
+            graduation=json.loads(r['graduation_json']) if r['graduation_json'] else None
+            if graduation and base.stamp(graduation['block_timestamp'])<=r['feature_cutoff_at']:
+                proof=json.loads(r['proof_json'])
+                if not {'curve','v4','hook'}.issubset(
+                        {f['kind'] for f in proof.get('filters',[]) if f.get('bootstrap_status')=='complete'
+                         and f.get('cursor') is not None}):
+                    continue
             if hashlib.sha256(r['payload'].encode()).hexdigest()!=r['payload_sha256']:
                 raise ValueError('Immutable feature payload hash mismatch')
             versions[key]=dict(r)
@@ -317,6 +324,38 @@ def ledger_audit(db,as_of):
         WHERE materialized_at<=? AND (write_reason LIKE 'reorg%' OR coverage_reason LIKE '%reorg%')''',(as_of,))
         if (r['launch_id'],r['window_seconds']) in versions and
         r['version_number']>versions[(r['launch_id'],r['window_seconds'])]['version_number']}
+    features={(r['launch_id'],r['window_seconds']):r['coverage_quality'] for r in db.execute('''
+        SELECT launch_id,window_seconds,coverage_quality FROM flow.flow_features''')}
+    bias={'total_launches':0,'graduated_during_tracking':0,'spanning_windows':0,
+          'complete_spanning_windows':0,'partial_spanning_windows':0,
+          'unavailable_spanning_windows':0,'pit_eligible_spanning_windows':0}
+    rates={name:{'due_windows':0,'pit_eligible_windows':0} for name in
+           ('never_graduated_during_window','graduated_during_window')}
+    for t in db.execute('''SELECT launch_id,tracking_start_at,tracking_end_at,cohort_long,
+        graduation_json FROM flow.flow_tracking_targets WHERE tracking_start_at>=?
+        AND tracking_start_at<=?''',(start['start_at'],as_of)):
+        bias['total_launches']+=1
+        graduation=json.loads(t['graduation_json']) if t['graduation_json'] else None
+        graduated_at=base.stamp(graduation['block_timestamp']) if graduation else None
+        if graduated_at is not None and t['tracking_start_at']<graduated_at<=t['tracking_end_at']:
+            bias['graduated_during_tracking']+=1
+        for window in base.WINDOWS:
+            if window==3600 and not t['cohort_long']:continue
+            cutoff=t['tracking_start_at']+window
+            if cutoff>as_of:continue
+            spanning=graduated_at is not None and t['tracking_start_at']<graduated_at<=cutoff
+            key=(t['launch_id'],window)
+            group=rates['graduated_during_window' if spanning else 'never_graduated_during_window']
+            group['due_windows']+=1
+            if key in versions and key not in invalidated:group['pit_eligible_windows']+=1
+            if spanning:
+                bias['spanning_windows']+=1
+                quality=features.get(key,'unavailable')
+                bias[f'{quality}_spanning_windows']+=1
+                if key in versions and key not in invalidated:bias['pit_eligible_spanning_windows']+=1
+    bias['eligibility_rates']={name:{**group,'rate':(group['pit_eligible_windows']/group['due_windows']
+                                                    if group['due_windows'] else None)}
+                               for name,group in rates.items()}
     pair_counts={};model_rows=[]
     for window in base.WINDOWS:
         for horizon in base.HORIZONS:
@@ -363,6 +402,7 @@ def ledger_audit(db,as_of):
     return {'boundary':{'start_utc':utc(start['start_at']),'start_block':start['start_block'],
                         'deploy_revision':start['deploy_revision']},'launches':launches,
             'complete_windows':complete,'first_eligible_versions':len(versions),
+            'graduation_selection_bias':bias,
             'usable_by_pair':pair_counts,'days_of_history':(as_of-start['start_at'])/86400,
             'model_readiness':chronological_readiness(model_rows,True)}
 

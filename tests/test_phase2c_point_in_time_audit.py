@@ -43,7 +43,7 @@ class PointInTimeTests(unittest.TestCase):
         with sqlite3.connect(self.flow) as db:
             db.executescript('''CREATE TABLE flow_cutover_sessions(id TEXT,payload TEXT,status TEXT);
             CREATE TABLE flow_tracking_targets(launch_id INTEGER,token_address TEXT,quote_asset_address TEXT,
-              tracking_start_at REAL,cohort_initial INTEGER,cohort_long INTEGER,graduation_json TEXT);
+              tracking_start_at REAL,tracking_end_at REAL,cohort_initial INTEGER,cohort_long INTEGER,graduation_json TEXT);
             CREATE TABLE flow_features(launch_id INTEGER,window_seconds INTEGER,feature_cutoff_at REAL,
               finalized_at REAL,coverage_quality TEXT,metrics TEXT);
             CREATE TABLE flow_events(launch_id INTEGER,event_time REAL,observed_at REAL,removed INTEGER,
@@ -54,8 +54,8 @@ class PointInTimeTests(unittest.TestCase):
                         'validation_started_at':1100,'H_live':1234}),'COMPLETE'))
             metrics = {key:1 for key in pit.base.PREDICTORS}
             for launch,start in ((1,900),(2,1200)):
-                db.execute('INSERT INTO flow_tracking_targets VALUES(?,?,?,?,1,1,NULL)',
-                           (launch,f'token{launch}','quote',start))
+                db.execute('INSERT INTO flow_tracking_targets VALUES(?,?,?,?,?,1,1,NULL)',
+                           (launch,f'token{launch}','quote',start,start+3600))
                 db.execute('INSERT INTO flow_features VALUES(?,?,?,?,?,?)',
                            (launch,60,start+60,start+65,'complete',json.dumps(metrics)))
                 db.execute('INSERT INTO flow_events VALUES(?,?,?,?,?,?,?,?,?)',
@@ -149,20 +149,46 @@ class PointInTimeTests(unittest.TestCase):
         with sqlite3.connect(self.flow) as db:
             db.executescript('''CREATE TABLE flow_feature_ledger_start(id INTEGER,start_at REAL,start_block INTEGER,deploy_revision TEXT);
                 CREATE TABLE flow_feature_versions(launch_id INTEGER,window_seconds INTEGER,version_number INTEGER,
-                  feature_schema_version TEXT,materialized_at REAL,coverage_quality TEXT,model_eligible_at REAL,
-                  payload TEXT,payload_sha256 TEXT,write_reason TEXT,coverage_reason TEXT);''')
+                  feature_schema_version TEXT,feature_cutoff_at REAL,materialized_at REAL,coverage_quality TEXT,
+                  model_eligible_at REAL,payload TEXT,payload_sha256 TEXT,write_reason TEXT,
+                  coverage_reason TEXT,proof_json TEXT);''')
             db.execute('INSERT INTO flow_feature_ledger_start VALUES(1,1100,1234,?)',('a'*40,))
-            db.execute('INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-                       (2,60,1,'v1',1264,'partial',None,payload,hashlib.sha256(payload.encode()).hexdigest(),'initial','bootstrap_required'))
-            db.execute('INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-                       (2,60,2,'v1',1265,'complete',1265,payload,hashlib.sha256(payload.encode()).hexdigest(),'rebuild','complete'))
-            db.execute('INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-                       (2,60,3,'v1',1266,'complete',1266,payload,hashlib.sha256(payload.encode()).hexdigest(),'rebuild','complete'))
+            proof=json.dumps({'filters':[{'kind':kind,'bootstrap_status':'complete','cursor':1234}
+                                         for kind in ('curve','v4','hook')]})
+            for version,materialized,quality,eligible,reason in (
+                    (1,1264,'partial',None,'bootstrap_required'),
+                    (2,1265,'complete',1265,'complete'),
+                    (3,1266,'complete',1266,'complete')):
+                db.execute('INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                           (2,60,version,'v1',1260,materialized,quality,eligible,payload,
+                            hashlib.sha256(payload.encode()).hexdigest(),'rebuild',reason,proof))
         with pit.base.open_readonly(self.main,self.flow) as db:
             result=pit.ledger_audit(db,30000)
         self.assertEqual(result['first_eligible_versions'],1)
         self.assertEqual(result['usable_by_pair']['60s_to_21600s'],1)
         self.assertEqual(result['launches'],1)
+        with sqlite3.connect(self.flow) as db:
+            db.execute('UPDATE flow_tracking_targets SET graduation_json=? WHERE launch_id=2',
+                       (json.dumps({'block_timestamp':iso(1250)}),))
+            full=db.execute('SELECT proof_json FROM flow_feature_versions WHERE launch_id=2 AND version_number=2').fetchone()[0]
+            curve_only=json.dumps({'filters':[{'kind':'curve','bootstrap_status':'complete','cursor':1234}]})
+            db.execute('UPDATE flow_feature_versions SET proof_json=? WHERE launch_id=2 AND version_number=2',(curve_only,))
+        with pit.base.open_readonly(self.main,self.flow) as db:
+            self.assertEqual(pit.ledger_audit(db,30000)['first_eligible_versions'],1)
+        with sqlite3.connect(self.flow) as db:
+            db.execute('UPDATE flow_feature_versions SET proof_json=? WHERE launch_id=2 AND version_number=3',(curve_only,))
+        with pit.base.open_readonly(self.main,self.flow) as db:
+            self.assertEqual(pit.ledger_audit(db,30000)['first_eligible_versions'],0)
+        with sqlite3.connect(self.flow) as db:
+            db.execute('UPDATE flow_feature_versions SET proof_json=? WHERE launch_id=2 AND version_number IN (2,3)',(full,))
+        with pit.base.open_readonly(self.main,self.flow) as db:
+            bias=pit.ledger_audit(db,30000)['graduation_selection_bias']
+        self.assertEqual((bias['total_launches'],bias['graduated_during_tracking'],bias['spanning_windows']),
+                         (1,1,4))
+        self.assertEqual((bias['complete_spanning_windows'],bias['unavailable_spanning_windows'],
+                          bias['pit_eligible_spanning_windows']),(1,3,1))
+        self.assertEqual(bias['eligibility_rates']['graduated_during_window'],
+                         {'due_windows':4,'pit_eligible_windows':1,'rate':.25})
         with sqlite3.connect(self.flow) as db:
             db.execute('UPDATE flow_feature_versions SET model_eligible_at=? WHERE launch_id=2 AND version_number=2',
                        (22801,))

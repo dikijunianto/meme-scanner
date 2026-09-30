@@ -35,10 +35,11 @@ class CursorBootstrap:
             return row['block_number'],stamp(row['block_timestamp'])
         return head,head_at
 
-    def _plan(self, stage, ids, head, head_at):
+    def _plan(self, stage, ids, head, head_at, kinds=None):
         for target in self._targets(ids):
             cap,cap_at=self._expiry_cap(target,head,head_at)
             for kind,query,base,end in self.runner.periods(target,cap):
+                if kinds is not None and kind not in kinds:continue
                 if base>cap:continue
                 end=min(end,cap)
                 if end<base:continue
@@ -70,7 +71,7 @@ class CursorBootstrap:
                         self.db.conn.execute("UPDATE flow_bootstrap SET status='in_progress' WHERE launch_id=? AND kind=? AND status='required'",
                                              (target['launch_id'],kind))
 
-    async def freeze(self, stage, ids):
+    async def freeze(self, stage, ids, kinds=None):
         saved=self.runner.meta(stage+':head')
         if saved is None:
             head=int(await self.worker.rpc.call('eth_blockNumber',[]),16)
@@ -84,7 +85,7 @@ class CursorBootstrap:
         else:
             head=int(saved);head_at=int(self.runner.meta(stage+':head_at'))
             ids=json.loads(self.runner.meta(stage+':ids'))
-        self._plan(stage,ids,head,head_at)
+        self._plan(stage,ids,head,head_at,kinds)
         return head,head_at,ids
 
     def _verify_job(self, stage, job):
@@ -167,12 +168,16 @@ class CursorBootstrap:
           WHERE launch_id IN (%s) GROUP BY coverage_quality'''%','.join('?' for _ in affected),tuple(affected)).fetchall()
         return {'targets':sorted(affected),'features_before':dict(before),'features_after':dict(after)}
 
-    async def run(self, stage, ids):
-        head,head_at,ids=await self.freeze(stage,ids)
+    async def run(self, stage, ids, kinds=None, active_only=False):
+        head,head_at,ids=await self.freeze(stage,ids,kinds)
         complete=await self.runner.run_stage(stage)
-        result={'stage':stage,'head':head,'head_at':head_at,'ids':ids,**self.runner.summary(stage)}
+        result={'stage':stage,'head':head,'head_at':head_at,'ids':ids,
+                'pause_scope':self.runner.pause_scope,**self.runner.summary(stage)}
         if not complete:
             return {'gate':'MISSING_CURSOR_BOOTSTRAP_PENDING',**result}
+        if active_only and any((t['status'] in ('completed','partial') or
+                                t['tracking_end_at']+10<time.time()) for t in self._targets(ids)):
+            return {'gate':'MISSING_CURSOR_BOOTSTRAP_PENDING','expired_incomplete':True,**result}
         result['promotion']=self.promote(stage)
         return {'gate':'BOOTSTRAP_PROOF_COMPLETE',**result}
 
