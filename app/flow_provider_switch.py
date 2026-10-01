@@ -1,6 +1,9 @@
 """Durable WSS connection and provider-switch evidence for the split flow worker."""
 import json
+import hashlib
 import time
+
+from app.flow_data import BUY,SELL
 
 
 def pending(db,session_id=None):
@@ -134,6 +137,70 @@ def failed(db,switch_id,reason):
     if not row or row['id']!=switch_id:raise ValueError('Provider switch is not pending')
     item=value(row);item.update(failure=reason,failed_at=time.time())
     save(db,switch_id,'FAILED',item)
+    return item
+
+
+def resume_proved_failure(db,switch_id,revision,now=None):
+    """Hand an already-proved failure back to the worker; never clear runtime state."""
+    now=time.time() if now is None else now
+    if len(revision)!=40 or any(c not in '0123456789abcdef' for c in revision):
+        raise ValueError('Exact source revision required')
+    with db.conn:
+        db.conn.execute('BEGIN IMMEDIATE')
+        row=db.conn.execute('SELECT * FROM flow_provider_switches WHERE id=?',(switch_id,)).fetchone()
+        if not row or row['state']!='FAILED' or latest(db,row['session_id'])['id']!=switch_id:
+            raise ValueError('Latest failed provider switch required')
+        item=value(row)
+        if (pending(db,row['session_id']) or db.state('connection_state')!='connected' or
+            db.state('current_wss_provider')!=item['new_provider'] or item['new_provider']!='validation' or
+            not 0<=now-float(db.state('heartbeat',0))<=65):
+            raise ValueError('Fresh matching Validation connection required')
+        if db.conn.execute("SELECT 1 FROM flow_tracking_targets WHERE status NOT IN ('completed','partial') LIMIT 1").fetchone():
+            raise ValueError('Zero active targets required for failed-switch handoff')
+        if not item.get('subscriptions_ready_at') or item.get('frozen_head') is None:
+            raise ValueError('Frozen acknowledged switch proof required')
+        stage=f'provider_switch:{switch_id}'
+        jobs={(r['launch_id'],r['kind']):dict(r) for r in db.conn.execute(
+            'SELECT * FROM flow_shadow_jobs WHERE stage=?',(stage,))}
+        required={(f['launch_id'],f['kind']) for f in item['filters']}
+        if not required or set(jobs)!=required:
+            raise ValueError('Exact switch filter proof required')
+        proof=[]
+        for f in item['filters']:
+            target=db.target(f['launch_id'])
+            if (not target or f['kind']!='curve' or target['graduation_json'] or
+                target['launch_block']!=f['base']):
+                raise ValueError('Frozen curve filter identity changed')
+            job=jobs[f['launch_id'],f['kind']]
+            first=max(item['uncertain_from'],f['base']);head=item['frozen_head']
+            if (job['original_safe_start']!=first or job['reconciliation_upper_bound']!=head or
+                job['completion_status']!='complete' or job['next_unverified_block']!=head+1 or
+                job['highest_contiguous_verified_block']!=head):
+                raise ValueError('Switch filter has incomplete proof')
+            ranges=[dict(r) for r in db.conn.execute('SELECT first_block,last_block FROM flow_shadow_ranges '
+                'WHERE stage=? AND launch_id=? AND kind=? ORDER BY first_block,last_block',
+                (stage,f['launch_id'],f['kind']))]
+            covered=first-1
+            for r in ranges:
+                if r['first_block']>covered+1 or r['first_block']<first or r['last_block']>head:
+                    raise ValueError('Switch range provenance is not contiguous')
+                covered=max(covered,r['last_block'])
+            if covered!=head:raise ValueError('Switch range provenance is incomplete')
+            query={'address':target['curve_address'].lower(),'topics':[[BUY,SELL]]}
+            proof.append({'launch_id':f['launch_id'],'kind':f['kind'],'query':query,'ranges':ranges})
+        for gap_id in item['gap_ids']:
+            gap=db.conn.execute('SELECT * FROM flow_gaps WHERE id=?',(gap_id,)).fetchone()
+            if (not gap or gap['launch_id'] not in {f['launch_id'] for f in item['filters']} or
+                gap['reason']!='ws_gap' or gap['first_block'] is None or
+                not item['uncertain_from']<=gap['first_block']<=item['frozen_head'] or
+                gap['end_at']>item['head_at']):
+                raise ValueError('Switch gap identity changed')
+        original=json.dumps(item,sort_keys=True,separators=(',',':'))
+        item['failure_history']={'state':'FAILED','payload':json.loads(original),
+                                 'payload_sha256':hashlib.sha256(original.encode()).hexdigest()}
+        item['recovery_after_failure']={'proved_at':now,'revision':revision,'stage':stage,'proof':proof}
+        db.conn.execute("UPDATE flow_provider_switches SET state='PROVIDER_SWITCH_RECOVERY',payload=? "
+                        "WHERE id=? AND state='FAILED'",(json.dumps(item,sort_keys=True),switch_id))
     return item
 
 

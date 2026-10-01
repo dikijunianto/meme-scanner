@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -64,6 +65,60 @@ class ShadowTests(unittest.IsolatedAsyncioTestCase):
             VALUES(?,?,?,?,?,?,?)''',('switch-test','2026-09-27T00:00:00Z','test',
                   'alchemy','10','POST_CUTOVER_VALIDATING',json.dumps(value)))
         return value
+
+    def failed_switch(self):
+        value=self.validating_session();head=self.base+100
+        self.db.gap(self.t['launch_id'],1000,1100,'ws_gap',self.base)
+        gap=self.db.conn.execute('SELECT max(id) FROM flow_gaps').fetchone()[0]
+        identity,_=provider_switch.start(self.db,'validation',
+            [{'launch_id':self.t['launch_id'],'kind':'curve','base':self.base,'cursor':None}],
+            [gap],session_id=value['id'])
+        provider_switch.connected(self.db,identity,'validation',1)
+        provider_switch.acknowledged(self.db,identity)
+        provider_switch.frozen(self.db,identity,head,self.base)
+        provider_switch.failed(self.db,identity,'connection_lost_before_switch_proof')
+        stage=f'provider_switch:{identity}'
+        self.runner.add_jobs(stage,self.base,head,{self.t['launch_id']})
+        with self.db.conn:self.db.conn.execute("UPDATE flow_tracking_targets SET status='partial'")
+        self.db.set_state('heartbeat',time.time())
+        self.db.set_state('current_wss_provider','validation')
+        self.db.set_state('connection_state','connected')
+        self.db.set_state('service_status','provider_switch_failed')
+        self.db.set_state('recovery_state','provider_switch_failed')
+        self.runner.worker.ws_provider='validation'
+        return identity,stage
+
+    async def test_failed_switch_requires_proof_then_existing_worker_derives_health(self):
+        identity,stage=self.failed_switch()
+        before=provider_switch.latest(self.db,'switch-test')['payload']
+        with self.assertRaises(ValueError):provider_switch.resume_proved_failure(self.db,identity,'a'*40)
+        self.assertEqual(provider_switch.latest(self.db,'switch-test')['payload'],before)
+        calls=self.mock_rpc(self.base+100)
+        self.assertTrue(await self.runner.run_stage(stage))
+        resumed=provider_switch.resume_proved_failure(self.db,identity,'a'*40)
+        self.assertEqual(resumed['failure_history']['payload'],json.loads(before))
+        self.assertEqual(self.db.state('recovery_state'),'provider_switch_failed')
+        await self.runner.worker.prove_provider_switch()
+        self.assertEqual(len(calls),1)
+        self.assertEqual(self.db.state('recovery_state'),'healthy')
+        self.assertFalse(provider_switch.blocked(self.db,'switch-test'))
+        self.assertEqual(self.db.target(1)['status'],'partial')
+        self.assertEqual(self.db.used('flow_eth_getTransactionReceipt',0),0)
+        self.assertEqual(self.db.used('flow_eth_getTransactionByHash',0),0)
+        final=provider_switch.value(provider_switch.latest(self.db,'switch-test'))
+        self.assertEqual(final['failure'],'connection_lost_before_switch_proof')
+        self.assertIn('failed_at',final)
+
+    async def test_failed_switch_cannot_resume_with_range_hole_or_new_active_target(self):
+        identity,stage=self.failed_switch();self.mock_rpc(self.base+100)
+        self.assertTrue(await self.runner.run_stage(stage))
+        with self.db.conn:self.db.conn.execute("UPDATE flow_tracking_targets SET status='active_curve'")
+        with self.assertRaises(ValueError):provider_switch.resume_proved_failure(self.db,identity,'a'*40)
+        with self.db.conn:
+            self.db.conn.execute("UPDATE flow_tracking_targets SET status='partial'")
+            self.db.conn.execute('DELETE FROM flow_shadow_ranges WHERE stage=?',(stage,))
+        with self.assertRaises(ValueError):provider_switch.resume_proved_failure(self.db,identity,'a'*40)
+        self.assertEqual(provider_switch.latest(self.db,'switch-test')['state'],'FAILED')
 
     async def test_354_block_shadow_replay_deduplicates_and_keeps_runtime_limit(self):
         head=self.base+354
