@@ -697,17 +697,16 @@ class FlowWorker:
         row=provider_switch.pending(self.db,identity)
         if not row or time.time()<self.switch_retry_at:return
         item=provider_switch.value(row)
+        if not item['filters']:
+            if not item['new_connected_at'] or item['new_provider']!=self.ws_provider:
+                raise RpcError('Provider switch connection identity changed')
+            provider_switch.complete_zero_filter(self.db,row['id'])
+            return
         if not self.subscriptions_acknowledged():return
         if not item['new_connected_at'] or item['new_provider']!=self.ws_provider:
             raise RpcError('Provider switch connection identity changed')
         if not item['subscriptions_ready_at']:
             item=provider_switch.acknowledged(self.db,row['id'])
-        if not item['filters']:
-            provider_switch.healthy(self.db,row['id'],{'calls':0,'recovered_events':0,
-                'duplicates':0,'unresolved_ranges':[],'zero_active_filters':True},[])
-            self.db.set_state('service_status','connected')
-            self.db.set_state('recovery_state','healthy')
-            return
         # Reuse the durable, adaptive Validation HTTP proof and canonical event dedupe.
         from app.flow_shadow import ShadowReconciler
         original_rpc=self.rpc
@@ -828,7 +827,8 @@ class FlowWorker:
                                 except FlowBudget as exc:self.defer_recovery(exc)
                                 except (RpcError,ValueError) as exc:
                                     switching=provider_switch.pending(self.db,current['id'] if current else None)
-                                    if switching:provider_switch.failed(self.db,switching['id'],type(exc).__name__)
+                                    if switching:provider_switch.failed(self.db,switching['id'],type(exc).__name__,
+                                        connection_id=self.connection_id,provider=self.ws_provider)
                                     self.db.set_state('service_status','provider_switch_failed')
                                     self.db.set_state('recovery_state','provider_switch_failed')
                             self.drain()
@@ -855,11 +855,14 @@ class FlowWorker:
                     self.db.count('flow_provider_connection_errors_'+self.ws_provider)
                     log.warning('Flow disconnected provider=%s error=%s attempts=%d',self.ws_provider,type(exc).__name__,failures)
                     now=time.time()
-                    provider_switch.connection_close(self.db,self.connection_id,now);self.connection_id=None
+                    lost_connection_id=self.connection_id
+                    provider_switch.connection_close(self.db,lost_connection_id,now);self.connection_id=None
                     identity=current['id'] if current else None
                     switching=provider_switch.pending(self.db,identity) if self.settings.split_enabled else None
-                    if switching and provider_switch.value(switching)['new_connected_at']:
-                        provider_switch.failed(self.db,switching['id'],'connection_lost_before_switch_proof')
+                    if (switching and lost_connection_id is not None and
+                        provider_switch.value(switching)['new_connected_at'] and
+                        provider_switch.failed(self.db,switching['id'],'connection_lost_before_switch_proof',
+                                               connection_id=lost_connection_id,provider=self.ws_provider)):
                         switching=None
                     gap_ids=[]
                     if not switching:

@@ -59,6 +59,7 @@ def start(db,old_provider,filters,gap_ids,*,session_id=None,ready_at=None,last_b
         save(db,row['id'],row['state'],item)
         return row['id'],item
     item={'old_provider':old_provider,'new_provider':None,'first_disconnect_at':now,
+          'created_at':now,'filter_snapshot_at':now,
           'last_disconnect_at':now,'disconnect_attempts':1,
           'old_subscription_ready_at':ready_at,'last_old_block':last_block,
           'filters':filters,'gap_ids':gap_ids,'new_connected_at':None,
@@ -87,6 +88,72 @@ def connected(db,switch_id,provider,connection_id,now=None):
     item=value(row);item.update(new_provider=provider,new_connected_at=time.time() if now is None else now,
                                 new_connection_id=connection_id)
     save(db,switch_id,'VALIDATION_CONNECTED' if provider=='validation' else 'PRIMARY_CONNECTED',item)
+    if not item['filters']:
+        return complete_zero_filter(db,switch_id)
+    return item
+
+
+def complete_zero_filter(db,switch_id):
+    """Transport establishes vacuous snapshot coverage, not an invented ACK/head."""
+    row=db.conn.execute('SELECT * FROM flow_provider_switches WHERE id=?',(switch_id,)).fetchone()
+    item=zero_filter_evidence(db,switch_id,value(row))
+    return save(db,switch_id,'HEALTHY',item)
+
+
+def zero_filter_evidence(db,switch_id,item):
+    if (not item or item['filters']!=[] or item['gap_ids']!=[] or
+        not item['new_connected_at'] or item['new_provider'] not in ('publicnode','validation') or
+        item.get('recovery') is not None or
+        any(item.get(k) is not None for k in ('subscriptions_ready_at','frozen_head',
+                                             'uncertain_from','uncertain_to'))):
+        raise ValueError('Unproved zero-filter transport or unexpected proof')
+    for table in ('flow_shadow_jobs','flow_shadow_ranges'):
+        row=db.conn.execute('SELECT session_id FROM flow_provider_switches WHERE id=?',(switch_id,)).fetchone()
+        stage=f'provider_switch:{switch_id}'
+        if (db.conn.execute('SELECT 1 FROM sqlite_master WHERE type=? AND name=?',('table',table)).fetchone()
+            and db.conn.execute(f'SELECT 1 FROM {table} WHERE stage IN (?,?) LIMIT 1',
+                                (stage,f'cutover:{row[0]}:{stage}')).fetchone()):
+            raise ValueError('Zero-filter switch has range work')
+    item.update(zero_filter_switch=True,no_subscriptions_required=True,
+                subscriptions_required=0,recovery_required=False,unresolved_ranges=0,
+                recovery={'calls':0,'recovered_events':0,'duplicates':0,
+                          'unresolved_ranges':[],'zero_active_filters':True},
+                resolved_gap_ids=[],healthy_at=time.time())
+    return item
+
+
+def reconcile_zero_filter_failure(db,switch_id,revision,now=None):
+    """Preserve the failure and close empty coverage; runtime is worker-owned."""
+    now=time.time() if now is None else now
+    if len(revision)!=40 or any(c not in '0123456789abcdef' for c in revision):
+        raise ValueError('Exact source revision required')
+    with db.conn:
+        db.conn.execute('BEGIN IMMEDIATE')
+        row=db.conn.execute('SELECT * FROM flow_provider_switches WHERE id=?',(switch_id,)).fetchone()
+        if not row or row['state']!='FAILED' or latest(db,row['session_id'])['id']!=switch_id:
+            raise ValueError('Latest failed switch required')
+        item=value(row)
+        connection=db.conn.execute('SELECT * FROM flow_provider_connections WHERE session_id IS ? '
+                                   'ORDER BY id DESC LIMIT 1',(row['session_id'],)).fetchone()
+        if (pending(db,row['session_id']) or db.state('connection_state')!='connected' or
+            db.state('current_wss_provider')!=item['new_provider'] or
+            not connection or connection['provider']!=item['new_provider'] or
+            connection['disconnected_at'] is not None or
+            not 0<=now-connection['last_seen_at']<=65 or
+            not 0<=now-float(db.state('heartbeat',0))<=65):
+            raise ValueError('Fresh matching transport required')
+        original=json.dumps(item,sort_keys=True,separators=(',',':'))
+        item['failure_history']={'state':'FAILED','payload':json.loads(original),
+                                 'payload_sha256':hashlib.sha256(original.encode()).hexdigest()}
+        item['recovery_after_failure']={'proved_at':now,'revision':revision,
+            'zero_filter_snapshot':True,'current_connection_id':connection['id'],
+            'current_provider':connection['provider'],'rpc_calls':0,
+            'state_transitions':['FAILED','PROVIDER_SWITCH_RECOVERY','HEALTHY']}
+        item=zero_filter_evidence(db,switch_id,item)
+        # Both transitions commit atomically; an old worker cannot invent an ACK between them.
+        db.conn.execute("UPDATE flow_provider_switches SET state='PROVIDER_SWITCH_RECOVERY',payload=? "
+                        "WHERE id=? AND state='FAILED'",(json.dumps(item,sort_keys=True),switch_id))
+        db.conn.execute("UPDATE flow_provider_switches SET state='HEALTHY' WHERE id=?",(switch_id,))
     return item
 
 
@@ -132,10 +199,14 @@ def healthy(db,switch_id,recovery,resolved_gap_ids):
     return item
 
 
-def failed(db,switch_id,reason):
+def failed(db,switch_id,reason,*,connection_id=None,provider=None):
     row=db.conn.execute('SELECT * FROM flow_provider_switches WHERE id=?',(switch_id,)).fetchone()
     if not row or row['id']!=switch_id:raise ValueError('Provider switch is not pending')
-    item=value(row);item.update(failure=reason,failed_at=time.time())
+    item=value(row)
+    if connection_id is not None and (item.get('new_connection_id')!=connection_id or
+                                      item.get('new_provider')!=provider):
+        return None
+    item.update(failure=reason,failed_at=time.time())
     save(db,switch_id,'FAILED',item)
     return item
 
@@ -231,7 +302,8 @@ def report(db,now=None,session_id=None):
             'primary_disconnect_count':db.conn.execute("SELECT count(*) FROM flow_provider_connections "
                 "WHERE session_id IS ? AND provider='publicnode' AND disconnected_at IS NOT NULL",
                 (session_id,)).fetchone()[0],
-            'fallback_activation_count':sum(x['new_provider']=='validation' and x['new_connected_at'] is not None for x in switches),
+            'fallback_activation_count':sum(x['old_provider']=='publicnode' and x['new_provider']=='validation'
+                                            and x['new_connected_at'] is not None for x in switches),
             'failback_count':sum(x['old_provider']=='validation' and x['new_provider']=='publicnode' and x['new_connected_at'] is not None
                                   for x in switches)}
 
@@ -249,5 +321,6 @@ def acceptable_route(db,session_id):
     if provider=='publicnode':return True
     switches=[x for x in evidence['switches'] if x['new_provider']=='validation']
     return bool(switches and switches[-1]['state']=='HEALTHY' and
-                switches[-1].get('failover_reason') and switches[-1]['subscriptions_ready_at'] and
+                any(x['old_provider']=='publicnode' and x.get('failover_reason') for x in switches) and
+                (switches[-1]['subscriptions_ready_at'] or switches[-1].get('no_subscriptions_required')) and
                 switches[-1]['recovery'] is not None)

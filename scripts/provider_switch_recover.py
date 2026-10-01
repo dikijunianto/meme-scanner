@@ -8,7 +8,7 @@ import time
 from app.config import Config
 from app.flow_data import FlowDB
 from app.flow_providers import FlowProviders,provider
-from app.flow_provider_switch import latest,pending,resume_proved_failure,value
+from app.flow_provider_switch import latest,pending,resume_proved_failure,reconcile_zero_filter_failure,value
 from app.flow_shadow import make_reconciler,verified_checkout
 from app.flow_worker import FlowSettings
 from scripts.phase2b2_shadow import service
@@ -28,6 +28,21 @@ async def recover(identity,handoff=False):
         db.state('connection_state')!='connected' or db.state('current_wss_provider')!='validation' or
         not 0<=time.time()-float(db.state('heartbeat',0))<=65):
         raise ValueError('Fresh matching failed-switch connection required')
+    if not item['filters']:
+        try:
+            import sqlite3
+            main=sqlite3.connect(f'file:{config.database}?mode=ro',uri=True)
+            try:
+                if any(x!='ok' for x in (db.conn.execute('PRAGMA integrity_check').fetchone()[0],
+                                        main.execute('PRAGMA integrity_check').fetchone()[0])):
+                    raise ValueError('Database integrity failed')
+            finally:main.close()
+            if not handoff:raise ValueError('Explicit handoff required for zero-filter reconciliation')
+            if services!={u:service(u) for u in services}:raise ValueError('Service identity changed')
+            result=reconcile_zero_filter_failure(db,identity,revision)
+            return {'revision':revision,'services':services,'zero_filter_reconciliation':result,
+                    'rpc_calls':0,'worker_runtime_untouched':True}
+        finally:db.conn.close()
     runner,old=make_reconciler(config,settings,db,providers)
     try:
         await old.close()

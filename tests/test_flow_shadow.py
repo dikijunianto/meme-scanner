@@ -120,6 +120,44 @@ class ShadowTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):provider_switch.resume_proved_failure(self.db,identity,'a'*40)
         self.assertEqual(provider_switch.latest(self.db,'switch-test')['state'],'FAILED')
 
+    async def test_zero_snapshot_does_not_cover_later_target_bootstrap(self):
+        active=self.validating_session();worker=self.runner.worker
+        with self.db.conn:self.db.conn.execute('DELETE FROM flow_tracking_targets')
+        identity,_=provider_switch.start(self.db,'validation',[],[],session_id=active['id'])
+        connection=provider_switch.connection_open(self.db,'validation',session_id=active['id'])
+        with patch.object(worker.rpc,'call',new_callable=AsyncMock) as rpc:
+            provider_switch.connected(self.db,identity,'validation',connection)
+            self.t=insert_target(self.db,target())
+            worker.ensure_bootstrap_state(self.t)
+            await worker.prove_provider_switch()
+            rpc.assert_not_awaited()
+        self.assertIsNone(self.db.state('recovery:1:curve'))
+        self.assertEqual(self.db.conn.execute('SELECT status FROM flow_bootstrap WHERE launch_id=1').fetchone()[0],'required')
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_shadow_jobs').fetchone()[0],0)
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_shadow_ranges').fetchone()[0],0)
+        calls=self.mock_rpc(self.base+3)
+        await worker.recover_plans(worker.recovery_plan(self.t,self.base+3))
+        self.assertEqual(len(calls),1)
+        self.assertEqual(self.db.state('recovery:1:curve'),str(self.base+3))
+        self.assertEqual(provider_switch.latest(self.db,active['id'])['state'],'HEALTHY')
+        for metric in ('flow_eth_getTransactionReceipt','flow_eth_getTransactionByHash','flow_http_calls_alchemy'):
+            self.assertEqual(self.db.used(metric,0),0)
+
+    async def test_zero_failure_cannot_discard_existing_range_work(self):
+        active=self.validating_session()
+        identity,item=provider_switch.start(self.db,'validation',[],[],session_id=active['id'])
+        connection=provider_switch.connection_open(self.db,'validation',session_id=active['id'])
+        item.update(new_provider='validation',new_connected_at=time.time(),new_connection_id=connection)
+        with self.db.conn:self.db.conn.execute('UPDATE flow_provider_switches SET payload=? WHERE id=?',
+                                               (json.dumps(item),identity))
+        provider_switch.failed(self.db,identity,'connection_lost_before_switch_proof')
+        self.db.set_state('current_wss_provider','validation');self.db.set_state('connection_state','connected')
+        self.db.set_state('heartbeat',time.time())
+        self.runner.add_jobs(f'provider_switch:{identity}',self.base,self.base+3,{1})
+        before=provider_switch.latest(self.db,active['id'])
+        with self.assertRaises(ValueError):provider_switch.reconcile_zero_filter_failure(self.db,identity,'a'*40)
+        self.assertEqual(provider_switch.latest(self.db,active['id']),before)
+
     async def test_354_block_shadow_replay_deduplicates_and_keeps_runtime_limit(self):
         head=self.base+354
         rows=[]

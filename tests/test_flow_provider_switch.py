@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import tempfile
+import time
 import unittest
 
 from app.flow_data import FlowDB
@@ -30,11 +31,9 @@ class ProviderSwitchTests(unittest.TestCase):
         switch.failover_pending(self.db,identity,'RpcError')
         new=switch.connection_open(self.db,'validation',120,session_id='s')
         switch.connected(self.db,identity,'validation',new,120)
-        switch.acknowledged(self.db,identity,121)
         self.db.set_state('current_wss_provider','validation')
-        self.assertFalse(switch.acceptable_route(self.db,'s'))
-        switch.healthy(self.db,identity,{'calls':0,'recovered_events':0,'duplicates':0,
-                       'unresolved_ranges':[],'zero_active_filters':True},[])
+        self.assertEqual(switch.latest(self.db,'s')['state'],'HEALTHY')
+        self.assertIsNone(switch.value(switch.latest(self.db,'s'))['subscriptions_ready_at'])
         switch.connection_seen(self.db,new,124)
         self.assertTrue(switch.acceptable_route(self.db,'s'))
         report=switch.report(self.db,now=125,session_id='s')
@@ -83,15 +82,92 @@ class ProviderSwitchTests(unittest.TestCase):
             other='validation' if provider=='publicnode' else 'publicnode'
             if other=='validation':switch.failover_pending(self.db,identity,'RpcError')
             switch.connected(self.db,identity,other,offset+1,101+offset*60)
-            switch.acknowledged(self.db,identity,102+offset*60)
-            switch.healthy(self.db,identity,{'calls':0,'recovered_events':0,
-                           'duplicates':0,'unresolved_ranges':[],'zero_active_filters':True},[])
             provider=other
         self.db.set_state('current_wss_provider',provider)
         report=switch.report(self.db,session_id='s')
         self.assertTrue(report['provider_flapping'])
         self.assertEqual(report['failback_count'],2)
         self.assertFalse(switch.acceptable_route(self.db,'s'))
+
+
+    def zero_failure(self):
+        identity,_=switch.start(self.db,'validation',[],[],session_id='s',now=100)
+        old=switch.connection_open(self.db,'validation',101,session_id='s')
+        row=switch.latest(self.db,'s');item=switch.value(row)
+        item.update(new_provider='validation',new_connected_at=101,new_connection_id=old,
+                    failure='connection_lost_before_switch_proof',failed_at=102)
+        with self.db.conn:self.db.conn.execute("UPDATE flow_provider_switches SET state='FAILED',payload=? WHERE id=?",
+                                               (json.dumps(item),identity))
+        switch.connection_close(self.db,old,102)
+        new=switch.connection_open(self.db,'validation',session_id='s')
+        self.db.set_state('current_wss_provider','validation')
+        self.db.set_state('heartbeat',time.time())
+        self.db.set_state('recovery_state','provider_switch_failed')
+        return identity,item,new
+
+    def test_same_provider_zero_reconnect_needs_no_ack_head_or_rpc(self):
+        identity,_=switch.start(self.db,'validation',[],[],session_id='s')
+        connection=switch.connection_open(self.db,'validation',session_id='s')
+        item=switch.connected(self.db,identity,'validation',connection)
+        self.assertEqual(switch.latest(self.db,'s')['state'],'HEALTHY')
+        self.assertTrue(item['no_subscriptions_required'])
+        self.assertFalse(item['recovery_required'])
+        for key in ('subscriptions_ready_at','frozen_head','uncertain_from','uncertain_to'):
+            self.assertIsNone(item[key])
+        self.assertEqual(item['recovery']['calls'],0)
+        self.assertEqual(switch.report(self.db,session_id='s')['fallback_activation_count'],0)
+        self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_usage').fetchone()[0],0)
+
+    def test_zero_failure_preserves_original_and_never_sets_runtime(self):
+        identity,original,new=self.zero_failure()
+        item=switch.reconcile_zero_filter_failure(self.db,identity,'a'*40)
+        self.assertEqual(item['failure_history']['payload'],original)
+        self.assertEqual(item['failure'],original['failure'])
+        self.assertEqual(item['failed_at'],102)
+        self.assertEqual(item['new_connection_id'],original['new_connection_id'])
+        self.assertEqual(item['recovery_after_failure']['current_connection_id'],new)
+        self.assertEqual(switch.latest(self.db,'s')['state'],'HEALTHY')
+        self.assertEqual(self.db.state('recovery_state'),'provider_switch_failed')
+        self.assertIsNone(item['subscriptions_ready_at'])
+        with self.assertRaises(ValueError):switch.reconcile_zero_filter_failure(self.db,identity,'a'*40)
+
+    def test_zero_failure_rejects_gaps_ranges_or_stale_transport_atomically(self):
+        identity,original,new=self.zero_failure()
+        for key,bad in (('gap_ids',[1]),('filters',[{'kind':'curve'}]),
+                        ('frozen_head',100),('subscriptions_ready_at',100)):
+            item=dict(original);item[key]=bad
+            with self.db.conn:self.db.conn.execute('UPDATE flow_provider_switches SET payload=? WHERE id=?',
+                                                   (json.dumps(item),identity))
+            before=switch.latest(self.db,'s')
+            with self.assertRaises(ValueError):switch.reconcile_zero_filter_failure(self.db,identity,'a'*40)
+            self.assertEqual(switch.latest(self.db,'s'),before)
+        with self.db.conn:self.db.conn.execute('UPDATE flow_provider_switches SET payload=? WHERE id=?',
+                                               (json.dumps(original),identity))
+        switch.connection_close(self.db,new)
+        with self.assertRaises(ValueError):switch.reconcile_zero_filter_failure(self.db,identity,'a'*40)
+
+    def test_stale_old_connection_loss_does_not_fail_new_generation(self):
+        identity,_=switch.start(self.db,'validation',[{'kind':'curve'}],[],session_id='s')
+        old=switch.connection_open(self.db,'validation',session_id='s')
+        new=switch.connection_open(self.db,'validation',session_id='s')
+        switch.connected(self.db,identity,'validation',new)
+        before=switch.latest(self.db,'s')
+        switch.connection_close(self.db,old)
+        self.assertIsNone(switch.failed(self.db,identity,'stale',connection_id=old,provider='validation'))
+        self.assertIsNone(switch.failed(self.db,identity,'wrong_provider',connection_id=new,provider='publicnode'))
+        self.assertEqual(switch.latest(self.db,'s'),before)
+        switch.failed(self.db,identity,'lost',connection_id=new,provider='validation')
+        self.assertEqual(switch.latest(self.db,'s')['state'],'FAILED')
+
+    def test_same_provider_nonzero_still_waits_for_ack_and_head(self):
+        identity,_=switch.start(self.db,'validation',[{'kind':'curve'}],[],session_id='s')
+        switch.connected(self.db,identity,'validation',1)
+        self.assertEqual(switch.latest(self.db,'s')['state'],'VALIDATION_CONNECTED')
+        with self.assertRaises(ValueError):switch.frozen(self.db,identity,100,10)
+        switch.acknowledged(self.db,identity)
+        switch.frozen(self.db,identity,100,10)
+        self.assertEqual(switch.latest(self.db,'s')['state'],'PROVIDER_SWITCH_RECOVERY')
+        with self.assertRaises(ValueError):switch.healthy(self.db,identity,{'unresolved_ranges':[1]},[])
 
 
 if __name__=='__main__':unittest.main()
