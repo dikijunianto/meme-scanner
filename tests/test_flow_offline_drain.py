@@ -4,14 +4,14 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 from app.config import Config
 from app.flow_data import FlowDB
 from app.flow_offline_drain import OfflineDrain, OfflineAbort, dry_plan
 from app.flow_providers import FlowProviders, provider
 from app.flow_worker import FlowSettings, FlowWorker, FlowBudget
-from app.flow_shadow import ShadowReconciler
+from app.flow_shadow import ShadowReconciler, ShadowRpc
 from app.rpc import Rpc, RpcError, LogRangeError
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"scripts"))
@@ -77,7 +77,7 @@ class OfflineDrainTests(unittest.IsolatedAsyncioTestCase):
             self.db.gap(t['launch_id'],1000,1090,'reconnect_recovery_incomplete',t['launch_block'])
             self.db.gap(t['launch_id'],1000,1090,'recovery_rejection',t['launch_block'])
         before = [dict(r) for r in self.db.conn.execute('select * from flow_gaps')]
-        with self.assertRaises(FlowBudget): self.worker.recovery_plan(self.t,self.head)
+        with self.assertRaises(RpcError): self.worker.recovery_plan(self.t,self.head)
         result = await self.runner.run()
         self.assertTrue(result['restart_safe_now'])
         for launch in (1,2,3): self.assertEqual(self.db.state(f'recovery:{launch}:curve'),str(self.head))
@@ -89,6 +89,38 @@ class OfflineDrainTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('SECRET',json.dumps(result))
         self.assertEqual(self.db.used('flow_http_calls_alchemy',0),0)
         self.assertEqual(self.worker.rpc.config.rpc_rps,100000)  # test-only pacing override
+
+    async def test_offline_debt_then_new_worker_discovers_downtime_curve(self):
+        from app.flow_data import iso
+        await self.test_split_large_production_debt_multiple_gaps_and_manifest()
+        t=target(launch=4);t['launch_block']=self.base+30000
+        t['token_address']='0x'+format(4,'040x');t['curve_address']='0x'+format(104,'040x')
+        self.main.execute('INSERT INTO launches VALUES(?,?,?,?,?,?,?,?,?)',
+                          (4,t['token_address'],t['quote_asset_address'],t['curve_address'],t['creator_address'],iso(1000),t['launch_block'],0,1))
+        self.main.execute('INSERT INTO outcome_targets VALUES(?,?,?,?)',(4,0,'random_initial',iso(1000)));self.main.commit()
+        new=FlowWorker(self.config,self.settings,self.db,self.providers)
+        new.header=AsyncMock(return_value=1000)
+        self.db.set_state('phase2b_coverage_start_at',900)
+        self.db.set_state('quote_decimals:'+t['quote_asset_address'],18)
+        def fast(*args,**kwargs):
+            rpc=ShadowRpc(*args,**kwargs);rpc.config=replace(rpc.config,rpc_rps=100000);return rpc
+        try:
+            await new.discover()
+            self.assertEqual(new.bootstrap_kinds(self.db.target(4)),{'curve'})
+            self.assertIsNone(self.db.state('recovery:4:curve'))
+            with patch('app.flow_shadow.ShadowRpc',side_effect=fast):
+                new.subscribe=AsyncMock(return_value=['curve']);new.discover=AsyncMock()
+                # Previously drained targets use normal proof-backed recovery; only4 bootstraps.
+                new.rpc.config=replace(new.rpc.config,rpc_rps=100000)
+                for _ in range(3):
+                    new.bootstrap_retry_at.clear()
+                    await new.reconcile()
+            self.assertEqual(self.db.state('recovery:4:curve'),str(self.head))
+            self.assertEqual(self.db.conn.execute("SELECT count(*) FROM flow_shadow_ranges WHERE stage='live_bootstrap:4'").fetchone()[0],3)
+            self.assertEqual(self.db.conn.execute("SELECT count(*) FROM flow_gaps WHERE launch_id=4 AND reason='reconnect_recovery_incomplete'").fetchone()[0],0)
+            self.assertTrue(self.runner.assessment(self.head)['restart_safe_now'])
+        finally:
+            await new.rpc.close();new.main.close()
 
     async def test_partial_chunks_hold_cursor_and_resume_first_unverified(self):
         self.head = self.base+5000; self.fail_from = self.base+2000

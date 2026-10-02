@@ -183,7 +183,7 @@ class OfflineDrain(ShadowReconciler):
             f'recovery:{row["target"]["launch_id"]}:{filt["kind"]}')
         state = self.db.conn.execute('SELECT status FROM flow_bootstrap WHERE launch_id=? AND kind=?',
                                     (row['target']['launch_id'], filt['kind'])).fetchone()
-        if cursor is None or not state or state['status'] != 'complete':
+        if self.db.needs_bootstrap(row['target']['launch_id'],filt['kind']) or not state or state['status'] != 'complete':
             return base
         first = max(base, int(cursor)+1)
         gaps = self.db.conn.execute('SELECT first_block FROM flow_gaps WHERE launch_id=? AND resolved=0',
@@ -199,7 +199,7 @@ class OfflineDrain(ShadowReconciler):
                                     (launch, filt['kind'])).fetchone()
         gaps = self.db.conn.execute('SELECT 1 FROM flow_gaps WHERE launch_id=? AND resolved=0 LIMIT 1', (launch,)).fetchone()
         end = min(head, filt['end'])
-        return (cursor is None or state is None or state['status'] != 'complete' or bool(gaps) or
+        return (self.db.needs_bootstrap(launch,filt['kind']) or state is None or state['status'] != 'complete' or bool(gaps) or
                 end-max(filt['safe_start'], int(cursor)-2)+1 > RECOVERY_MAX_BLOCKS)
 
     def plan(self, manifest, head, head_at, stage):
@@ -268,7 +268,7 @@ class OfflineDrain(ShadowReconciler):
                 base = next(b for k, _, b, _ in self.periods(target, head) if k == kind)
                 state = self.db.conn.execute('SELECT * FROM flow_bootstrap WHERE launch_id=? AND kind=?', (launch, kind)).fetchone()
                 cursor = self.db.state(f'recovery:{launch}:{kind}')
-                if cursor is None or not state or state['status'] != 'complete':
+                if self.db.needs_bootstrap(launch,kind) or not state or state['status'] != 'complete':
                     if job['original_safe_start'] != base or (state and state['safe_start'] != base):
                         raise OfflineAbort('Activation proof incomplete')
                     self.db.conn.execute("""INSERT INTO flow_bootstrap VALUES(?,?,?,'complete',?,?,?)

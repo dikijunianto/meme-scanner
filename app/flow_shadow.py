@@ -75,6 +75,8 @@ class ShadowRpc(FlowRpc):
             if logs:
                 metrics += [('flow_eth_getLogs_validation', logs),
                             ('flow_shadow_eth_getLogs_validation', logs)]
+                if self.job and self.job[0].startswith(('live_bootstrap:','live_graduation:')):
+                    metrics.append(('flow_filter_bootstrap_getlogs',logs))
                 if self.job and self.job[0].startswith('live_graduation:'):
                     metrics.append(('flow_graduated_bootstrap_getlogs',logs))
             for item in members:
@@ -255,8 +257,9 @@ class ShadowReconciler:
                 return query
         raise RpcError('Shadow target filter changed')
 
-    async def run_stage(self, stage):
+    async def run_stage(self, stage,max_chunks=None):
         self.pause_scope = None
+        chunks=0
         if self.session_id and (not (current:=active_cutover(self.db)) or current['id']!=self.session_id):
             raise RpcError('Cutover session changed before proof')
         scoped=self.stage(stage)
@@ -271,6 +274,7 @@ class ShadowReconciler:
             last=job['reconciliation_upper_bound']
             graduation=json.loads(target['graduation_json']) if target['graduation_json'] else None
             while current<=last:
+                if max_chunks is not None and chunks>=max_chunks:return False
                 if getattr(self.worker,'connected',False):self.worker.drain()
                 end=min(last,current+span-1)
                 self.worker.rpc.job=key
@@ -288,7 +292,7 @@ class ShadowReconciler:
                     continue
                 except FlowBudget as exc:
                     self.pause_scope = exc.scope
-                    if stage.startswith('live_graduation:'):
+                    if stage.startswith(('live_graduation:','live_bootstrap:')):
                         return False
                     if 'minute' in str(exc):
                         if getattr(self.worker,'connected',False):self.worker.drain()
@@ -329,6 +333,7 @@ class ShadowReconciler:
                        self.db.used(f'flow_shadow_events_stored:{scoped}:{job["launch_id"]}:{job["kind"]}',0),
                        self.db.used(f'flow_shadow_duplicates:{scoped}:{job["launch_id"]}:{job["kind"]}',0),*key))
                 current=end+1
+                chunks+=1
                 if getattr(self.worker,'connected',False):self.worker.drain()
             self.worker.rpc.job=None
         return self.complete(stage)

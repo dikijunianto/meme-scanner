@@ -44,6 +44,8 @@ class ShadowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(provider(rpc.config.rpc_http),'validation')
             self.assertEqual(rpc.config.fallback_http,'')
             if method=='eth_blockNumber':return {'jsonrpc':'2.0','id':payload['id'],'result':hex(head)}
+            if method=='eth_getBlockByNumber':
+                return {'jsonrpc':'2.0','id':payload['id'],'result':{'number':hex(head),'timestamp':hex(1100),'hash':'0x'+'11'*32}}
             self.assertEqual(method,'eth_getLogs')
             q=payload['params'][0]
             first,last=int(q['fromBlock'],16),int(q['toBlock'],16)
@@ -136,7 +138,8 @@ class ShadowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_shadow_jobs').fetchone()[0],0)
         self.assertEqual(self.db.conn.execute('SELECT count(*) FROM flow_shadow_ranges').fetchone()[0],0)
         calls=self.mock_rpc(self.base+3)
-        await worker.recover_plans(worker.recovery_plan(self.t,self.base+3))
+        with patch('app.flow_worker.time.time',return_value=1100):
+            self.assertTrue(await worker.bootstrap_missing(self.t))
         self.assertEqual(len(calls),1)
         self.assertEqual(self.db.state('recovery:1:curve'),str(self.base+3))
         self.assertEqual(provider_switch.latest(self.db,active['id'])['state'],'HEALTHY')

@@ -161,6 +161,7 @@ class FlowWorker:
         self.pending_recovery=set()
         self.recovery_heads={};self.blocked_recovery={};self.recovery_wait_until=0;self.connection_started_at=0
         self.bootstrap_retry_at={}
+        self.bootstrap_last_launch=0
         self.connection_id=None;self.subscription_ready_at=None;self.switch_retry_at=0
 
     def cutover_tick(self, targets):
@@ -254,8 +255,8 @@ class FlowWorker:
             key=f'recovery:{t["launch_id"]}:{kind}'
             persisted=self.db.state(key)
             if persisted is not None and int(persisted)>last+2:raise RpcError('Recovery cursor is ahead of validated head')
-            if kind in ('v4','hook') and persisted is None:
-                raise RpcError('Graduated filter requires explicit bootstrap')
+            if self.db.needs_bootstrap(t['launch_id'],kind):
+                raise RpcError('Required filter needs explicit bootstrap')
             if kind=='curve' and g and persisted is not None and int(persisted)>=end:continue
             start=max(bases[kind],int(persisted)-2) if persisted is not None else bases[kind]
             if end>=start:
@@ -265,15 +266,8 @@ class FlowWorker:
 
     async def recover_plans(self,plans):
         for t,kind,query,key,first,last in plans:
-            bootstrapping=self.db.state(key) is None
-            if bootstrapping and kind in ('v4','hook'):
-                raise RpcError('Graduated filter requires explicit bootstrap')
-            if bootstrapping:
-                g=json.loads(t['graduation_json']) if t['graduation_json'] else None
-                base=g['block_number'] if g and kind!='curve' else t['launch_block']
-                if first!=base:raise RpcError('Bootstrap must begin at filter activation')
-                self.db.require_bootstrap(t,kind,base)
-                with self.db.conn:self.db.conn.execute("UPDATE flow_bootstrap SET status='in_progress' WHERE launch_id=? AND kind=? AND status='required'",(t['launch_id'],kind))
+            if self.db.needs_bootstrap(t['launch_id'],kind):
+                raise RpcError('Required filter needs explicit bootstrap')
             g=json.loads(t['graduation_json']) if t['graduation_json'] else None
             boundary=(g['block_number'],g['log_index']) if g else None
             current=first;span=RECOVERY_CHUNK_BLOCKS
@@ -302,11 +296,10 @@ class FlowWorker:
                         item['blockTimestamp']=hex(await self.header(int(item['blockNumber'],16)))
                     if self.ingest(t,item) is False:raise RpcError('Recovery event rejected')
                 # A missing cursor is all-or-nothing; partial proof cannot claim completeness.
-                if not bootstrapping:self.db.set_state(key,end)
+                self.db.set_state(key,end)
                 self.db.count('flow_recovery_blocks',end-current+1)
                 current=end+1
                 self.drain()
-            if bootstrapping:self.db.complete_bootstrap(t['launch_id'],kind,last)
 
     def pressure(self):
         # Degrade flow first, leaving the base service's settings untouched.
@@ -368,24 +361,33 @@ class FlowWorker:
             self.db.require_bootstrap(t,kind,base)
         if graduation:self.db.require_bootstrap(t,'curve',t['launch_block'])
 
-    async def bootstrap_graduated(self,t):
-        missing={kind for kind in ('v4','hook')
-                 if self.db.state(f'recovery:{t["launch_id"]}:{kind}') is None}
-        if not t['graduation_json'] or not missing:return True
+    def bootstrap_kinds(self,t):
+        kinds=list(self.filters(t))+(['curve'] if t['graduation_json'] else [])
+        return {kind for kind in kinds if self.db.needs_bootstrap(t['launch_id'],kind)}
+
+    async def bootstrap_missing(self,t,max_chunks=None):
+        missing=self.bootstrap_kinds(t)
+        if not missing:return True
         from app.flow_bootstrap import CursorBootstrap
         from app.flow_shadow import ShadowReconciler
         original_rpc=self.rpc
         runner=ShadowReconciler(self,reserve=0)
         try:
-            self.db.count('flow_graduated_bootstrap_attempts')
+            self.db.count('flow_filter_bootstrap_attempts')
+            if t['graduation_json']:self.db.count('flow_graduated_bootstrap_attempts')
+            # Keep existing graduation stage keys so interrupted proofs remain resumable.
+            prefix='live_graduation' if t['graduation_json'] else 'live_bootstrap'
             result=await CursorBootstrap(runner).run(
-                f'live_graduation:{t["launch_id"]}',[t['launch_id']],missing,active_only=True)
+                f'{prefix}:{t["launch_id"]}',[t['launch_id']],missing,active_only=True,max_chunks=max_chunks)
         finally:
             shadow_rpc=self.rpc;self.rpc=original_rpc
             await shadow_rpc.close()
-        if result['pause_scope']:self.db.count('flow_graduated_bootstrap_budget_waits')
+        if result['pause_scope']:
+            self.db.count('flow_filter_bootstrap_budget_waits')
+            if t['graduation_json']:self.db.count('flow_graduated_bootstrap_budget_waits')
         if result['gate']=='BOOTSTRAP_PROOF_COMPLETE':
-            self.db.count('flow_graduated_bootstrap_completed',len(missing))
+            self.db.count('flow_filter_bootstrap_completed',len(missing))
+            if t['graduation_json']:self.db.count('flow_graduated_bootstrap_completed',len(missing))
             self.dirty.add(t['launch_id'])
             return True
         self.db.set_state('service_status','bootstrap_required')
@@ -499,8 +501,9 @@ class FlowWorker:
         now=time.time()
         # Expiry is independent of HTTP availability or discovery success.
         for t in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE tracking_end_at+10<? AND status NOT IN ('completed','partial')",(now,)).fetchall():
-            if t['graduation_json'] and self.db.conn.execute("SELECT 1 FROM flow_bootstrap WHERE launch_id=? AND kind IN ('v4','hook') AND status!='complete' LIMIT 1",(t['launch_id'],)).fetchone():
-                self.db.count('flow_graduated_bootstrap_expired_incomplete')
+            if self.bootstrap_kinds(t):
+                self.db.count('flow_filter_bootstrap_expired_incomplete')
+                if t['graduation_json']:self.db.count('flow_graduated_bootstrap_expired_incomplete')
             self.pending_recovery.discard(t['launch_id']);self.recovery_heads.pop(t['launch_id'],None)
             self.blocked_recovery.pop(t['launch_id'],None)
             self.bootstrap_retry_at.pop(t['launch_id'],None)
@@ -550,32 +553,44 @@ class FlowWorker:
             recovery=[t for t in recovery if not self.accept_shadow_handoff(t)]
         if recovery and time.time()<self.recovery_wait_until:return
         if recovery:
+            normal=[t for t in recovery if not self.bootstrap_kinds(t)]
             try:
-                if any(t['launch_id'] not in self.recovery_heads for t in recovery):
+                if any(t['launch_id'] not in self.recovery_heads for t in normal):
                     # Pin a head once; retries cannot chase a moving chain.
                     last=int(await self.rpc.call('eth_blockNumber',[]),16)
                     self.latest_block=max(self.latest_block,last)
-                    for t in recovery:self.recovery_heads.setdefault(t['launch_id'],last)
+                    for t in normal:self.recovery_heads.setdefault(t['launch_id'],last)
             except FlowBudget:
                 raise
             except RpcError as exc:
                 log.warning('Flow recovery head failed error=%s',type(exc).__name__)
-                for t in recovery:self.recovery_gap(t)
+                for t in normal:self.recovery_gap(t)
                 self.recovery_wait_until=max(self.recovery_wait_until,time.time()+15)
                 self.db.set_state('service_status','provider_error')
                 self.db.set_state('recovery_rejection_scope','provider_error')
                 return
+            # One proof chunk per target/tick; rotate to avoid budget starvation.
+            recovery.sort(key=lambda t:(t['launch_id']<=self.bootstrap_last_launch,t['launch_id']))
             for t in recovery:
                 launch=t['launch_id']
-                if t['graduation_json'] and any(self.db.state(f'recovery:{launch}:{kind}') is None
-                                                for kind in ('v4','hook')):
+                if self.bootstrap_kinds(t):
                     if time.time()<self.bootstrap_retry_at.get(launch,0):continue
-                    try:complete=await self.bootstrap_graduated(t)
+                    before=self.db.used('flow_eth_getLogs',0)
+                    try:complete=await self.bootstrap_missing(t,max_chunks=1)
                     except FlowBudget:
-                        self.db.count('flow_graduated_bootstrap_budget_waits')
+                        self.db.count('flow_filter_bootstrap_budget_waits')
+                        if t['graduation_json']:self.db.count('flow_graduated_bootstrap_budget_waits')
                         self.db.set_state('service_status','bootstrap_required')
                         self.bootstrap_retry_at[launch]=time.time()+30
                         continue
+                    except RpcError as exc:
+                        self.db.count('flow_filter_bootstrap_provider_waits')
+                        self.db.set_state('service_status','bootstrap_required')
+                        self.bootstrap_retry_at[launch]=time.time()+30
+                        log.warning('Flow bootstrap deferred launch=%s error=%s',launch,type(exc).__name__)
+                        continue
+                    finally:
+                        if self.db.used('flow_eth_getLogs',0)>before:self.bootstrap_last_launch=launch
                     if complete:
                         self.recovery_heads.pop(launch,None)
                         self.bootstrap_retry_at.pop(launch,None)

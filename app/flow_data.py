@@ -285,10 +285,14 @@ class FlowDB:
                            row['coverage_quality'],row['coverage_reason'],payload,payload_hash,semantic_hash,
                            reason,start['deploy_revision'],json.dumps(evidence,sort_keys=True,separators=(',',':')),at))
 
+    def needs_bootstrap(self,launch,kind):
+        """A required filter without an established cursor needs explicit proof."""
+        return self.state(f'recovery:{launch}:{kind}') is None
+
     def require_bootstrap(self,target,kind,safe_start):
         """Make unknown completeness durable before a target can claim coverage."""
         launch=target['launch_id'];key=f'recovery:{launch}:{kind}'
-        if self.state(key) is not None:return False
+        if not self.needs_bootstrap(launch,kind):return False
         row=self.conn.execute('SELECT safe_start,status FROM flow_bootstrap WHERE launch_id=? AND kind=?',(launch,kind)).fetchone()
         if row:
             if row['safe_start']!=safe_start or row['status']=='complete':

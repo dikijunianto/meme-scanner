@@ -45,7 +45,7 @@ class CursorBootstrap:
                 if end<base:continue
                 cursor=self.db.state(f'recovery:{target["launch_id"]}:{kind}')
                 start=self.runner.historical_start(target,kind,base,end)
-                if cursor is None:
+                if self.db.needs_bootstrap(target['launch_id'],kind):
                     self.db.require_bootstrap(target,kind,base)
                     if start!=base:raise RpcError('Missing-cursor bootstrap must start at activation')
                 if start>end:continue
@@ -121,7 +121,7 @@ class CursorBootstrap:
                 state=self.db.conn.execute('SELECT safe_start,status FROM flow_bootstrap WHERE launch_id=? AND kind=?',
                                            (launch,kind)).fetchone()
                 cursor=self.db.state(f'recovery:{launch}:{kind}')
-                if cursor is None or (state and state['status']!='complete'):
+                if self.db.needs_bootstrap(launch,kind) or (state and state['status']!='complete'):
                     graduation=json.loads(target['graduation_json']) if target['graduation_json'] else None
                     base=graduation['block_number'] if graduation and kind!='curve' else target['launch_block']
                     if not state or state['safe_start']!=base or job['original_safe_start']!=base:
@@ -168,9 +168,9 @@ class CursorBootstrap:
           WHERE launch_id IN (%s) GROUP BY coverage_quality'''%','.join('?' for _ in affected),tuple(affected)).fetchall()
         return {'targets':sorted(affected),'features_before':dict(before),'features_after':dict(after)}
 
-    async def run(self, stage, ids, kinds=None, active_only=False):
+    async def run(self, stage, ids, kinds=None, active_only=False,max_chunks=None):
         head,head_at,ids=await self.freeze(stage,ids,kinds)
-        complete=await self.runner.run_stage(stage)
+        complete=await self.runner.run_stage(stage,max_chunks=max_chunks)
         result={'stage':stage,'head':head,'head_at':head_at,'ids':ids,
                 'pause_scope':self.runner.pause_scope,**self.runner.summary(stage)}
         if not complete:
