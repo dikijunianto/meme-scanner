@@ -264,6 +264,7 @@ class ShadowReconciler:
             key=(scoped,job['launch_id'],job['kind'])
             target=self.db.target(job['launch_id'])
             if not target:raise RpcError('Shadow target disappeared')
+            if getattr(self, 'skip_target', lambda target: False)(target):continue
             query=self._query(job,target)
             current=job['next_unverified_block']
             span=job['span']

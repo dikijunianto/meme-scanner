@@ -914,10 +914,15 @@ def main():
     config=Config.load()
     providers=FlowProviders.load()
     if settings.database.resolve()==config.database.resolve():raise ValueError('Flow database must be separate from the main database')
-    db=FlowDB(settings.database)
-    # Migration is an explicit deployment step, never a side effect of starting service.
-    if db.state('schema_version')!='1':raise ValueError('Run SQLite-safe flow initialization first')
-    asyncio.run(FlowWorker(config,settings,db,providers).run())
+    from app.flow_lock import flow_writer_lock
+    with flow_writer_lock(settings.database):
+        db=FlowDB(settings.database)
+        try:
+            # Migration is explicit, never a side effect of starting service.
+            if db.state('schema_version')!='1':raise ValueError('Run SQLite-safe flow initialization first')
+            asyncio.run(FlowWorker(config,settings,db,providers).run())
+        finally:
+            db.conn.close()
 
 
 def cli():
