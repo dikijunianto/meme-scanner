@@ -85,7 +85,7 @@ class FlowRpc(Rpc):
         n=len(members);getlogs=sum(m['method']=='eth_getLogs' for m in members)
         routed=provider(self.config.rpc_http)
         # Serialize with the shadow process. Rejected-before-send calls count as zero.
-        self.db.conn.execute('BEGIN IMMEDIATE')
+        self.db.budget_conn.execute('BEGIN IMMEDIATE')
         try:
             for scope,used,needed,limit,reset in (
                 ('daily_rpc',self.db.used('flow_rpc_members',day),n,self.settings.daily_calls,day+86400),
@@ -97,11 +97,11 @@ class FlowRpc(Rpc):
             if getlogs:metrics += [('flow_eth_getLogs_'+routed,getlogs)]
             metrics += [('flow_'+member['method'],1) for member in members]
             for name,count in metrics:
-                self.db.conn.execute('''INSERT INTO flow_usage VALUES(?,?,?) ON CONFLICT(minute,metric)
+                self.db.budget_conn.execute('''INSERT INTO flow_usage VALUES(?,?,?) ON CONFLICT(minute,metric)
                   DO UPDATE SET count=count+excluded.count''',(minute,name,count))
-            self.db.conn.commit()
+            self.db.budget_conn.commit()
         except BaseException as exc:
-            self.db.conn.rollback()
+            self.db.budget_conn.rollback()
             if isinstance(exc,FlowBudget):
                 self.db.set_state('budget_pause_provider',routed)
                 self.db.set_state('budget_pause_reason',exc.scope)
@@ -287,6 +287,12 @@ class FlowWorker:
                         item['blockTimestamp']=hex(await self.header(int(item['blockNumber'],16)))
                     if self.ingest(t,item) is False:raise RpcError('Recovery event rejected')
                 # A missing cursor is all-or-nothing; partial proof cannot claim completeness.
+                if self.db.epoch() and self.db.state(f'epoch_tail_proof:{t["launch_id"]}:{kind}') is None:
+                    from app.flow_identity import query_identity
+                    self.db.set_state(f'epoch_tail_proof:{t["launch_id"]}:{kind}',json.dumps({
+                        'first_block':first,'last_block':end,'query':query_identity(query),
+                        'proved_at':time.time(),'subscription_ready_at':self.subscription_ready_at,
+                        'acknowledged':(t['launch_id'],kind) in self.subscriptions}))
                 self.db.set_state(key,end)
                 self.db.count('flow_recovery_blocks',end-current+1)
                 current=end+1
@@ -362,7 +368,7 @@ class FlowWorker:
         from app.flow_bootstrap import CursorBootstrap
         from app.flow_shadow import ShadowReconciler
         original_rpc=self.rpc
-        runner=ShadowReconciler(self,reserve=0)
+        runner=ShadowReconciler(self,reserve=50 if self.db.epoch() else 0)
         try:
             self.db.count('flow_filter_bootstrap_attempts')
             if t['graduation_json']:self.db.count('flow_graduated_bootstrap_attempts')
@@ -484,7 +490,10 @@ class FlowWorker:
               (row['id'],row['token_address'],row['quote_asset_address'],row['curve_address'],row['creator_address'],decimals,
                row['cohort_long'],start,end,row['block_number'],row['log_index'],now,now))
             self.ensure_bootstrap_state(self.db.target(row['id']))
-            if start<float(self.db.state('phase2b_coverage_start_at')):
+            # A fresh epoch always has explicit launch-to-head bootstrap debt;
+            # a redundant timestamp-only gap must not outlive that real proof.
+            # Pre-boundary launches are excluded from epoch PIT independently.
+            if not self.db.epoch() and start<float(self.db.state('phase2b_coverage_start_at')):
                 self.db.gap(row['id'],start,float(self.db.state('phase2b_coverage_start_at')),'service_started_late')
             self.db.count('flow_targets_created')
 
@@ -633,6 +642,8 @@ class FlowWorker:
         active,historical=gap_counts(self.db)
         self.db.set_state('active_unresolved_gap_count',active)
         self.db.set_state('historical_unresolved_gap_count',historical)
+        from app.flow_epochs import seal_live
+        seal_live(self)
         if status=='connected' and not active and self.db.state('connection_state')=='connected':
             with self.db.conn:
                 for row in self.db.conn.execute("SELECT key,value FROM flow_state WHERE key LIKE 'pit_collection_incident:%'").fetchall():
@@ -683,7 +694,7 @@ class FlowWorker:
             self.dirty.clear()
             with self.db.conn:self.db.conn.execute("DELETE FROM flow_state WHERE key='features_dirty_from'")
         counts={k:sum(key[1]==k for key in self.subscriptions) for k in ('curve','v4','hook')}
-        size=sum(p.stat().st_size for p in [self.settings.database,Path(str(self.settings.database)+'-wal')] if p.exists())
+        size=sum(p.stat().st_size for p in [self.db.path,Path(str(self.db.path)+'-wal')] if p.exists())
         with self.db.conn:self.db.conn.execute('INSERT OR REPLACE INTO flow_samples VALUES(?,?,?,?,?,?,?)',
             (int(now)//30*30,len({key[0] for key in self.subscriptions}) if connected else 0,len(self.subscriptions) if connected else 0,counts['curve'] if connected else 0,counts['v4'] if connected else 0,counts['hook'] if connected else 0,size))
         self.db.set_state('heartbeat',now)
@@ -948,11 +959,13 @@ def main():
     with flow_writer_lock(settings.database):
         db=FlowDB(settings.database)
         try:
+            if (epoch:=db.epoch()) and epoch['status']!='ACTIVE':
+                raise ValueError('Historical epoch is closed; prepare a fresh proved epoch before starting')
             # Migration is explicit, never a side effect of starting service.
             if db.state('schema_version')!='1':raise ValueError('Run SQLite-safe flow initialization first')
             asyncio.run(FlowWorker(config,settings,db,providers).run())
         finally:
-            db.conn.close()
+            db.close()
 
 
 def cli():

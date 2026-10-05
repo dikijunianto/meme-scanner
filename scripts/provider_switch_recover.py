@@ -32,13 +32,16 @@ async def _recover(identity,handoff=False,conservative_later_head=False):
     if any(s['ActiveState']!='active' for s in services.values()):raise ValueError('Services must be active')
     config=Config.load();settings=FlowSettings.load();providers=FlowProviders.load()
     if not settings.split_enabled or provider(providers.http)!='validation':raise ValueError('Validation split required')
-    db=FlowDB(settings.database)
+    db=FlowDB(settings.database,follow_epoch=False)
     row=db.conn.execute('SELECT * FROM flow_provider_switches WHERE id=?',(identity,)).fetchone()
     if not row or row['state']!='FAILED':raise ValueError('Failed switch required')
     item=value(row);stage=f'provider_switch:{identity}'
-    if (latest(db,row['session_id'])['id']!=identity or pending(db,row['session_id']) or
+    historical=bool(db.epoch() and db.epoch()['status']=='QUARANTINED')
+    if historical and not conservative_later_head:
+        raise ValueError('Historical epoch requires conservative forensic recovery')
+    if (latest(db,row['session_id'])['id']!=identity or pending(db,row['session_id']) or (not historical and (
         db.state('connection_state')!='connected' or db.state('current_wss_provider')!='validation' or
-        not 0<=time.time()-float(db.state('heartbeat',0))<=65):
+        not 0<=time.time()-float(db.state('heartbeat',0))<=65))):
         raise ValueError('Fresh matching failed-switch connection required')
     if not item['filters']:
         try:

@@ -7,8 +7,10 @@ from app.flow_data import BUY,SELL
 
 
 def pending(db,session_id=None):
+    epoch=db.epoch()
+    if epoch and epoch['status']!='ACTIVE':return None
     row=db.conn.execute("SELECT * FROM flow_provider_switches WHERE state NOT IN ('HEALTHY','FAILED') "
-                        "AND session_id IS ? ORDER BY id DESC LIMIT 1",(session_id,)).fetchone()
+                        "AND (? OR session_id IS ?) ORDER BY id DESC LIMIT 1",(bool(epoch),session_id)).fetchone()
     return dict(row) if row else None
 
 
@@ -19,8 +21,9 @@ def latest(db,session_id=None):
 
 
 def blocked(db,session_id=None):
-    row=latest(db,session_id)
-    return bool(row and row['state']=='FAILED')
+    epoch=db.epoch()
+    if epoch and epoch['status']!='ACTIVE':return False
+    return bool(db.conn.execute("SELECT 1 FROM flow_provider_switches WHERE (? OR session_id IS ?) AND state='FAILED' LIMIT 1",(bool(epoch),session_id)).fetchone())
 
 
 def value(row):
@@ -50,9 +53,11 @@ def resume_budget_wait(db,row,now=None):
 
 def connection_open(db,provider,now=None,session_id=None):
     now=time.time() if now is None else now
+    from app.flow_epochs import allocate
+    identity=allocate(db,'connection')
     with db.conn:
-        cursor=db.conn.execute('INSERT INTO flow_provider_connections(session_id,provider,connected_at,last_seen_at) '
-                               'VALUES(?,?,?,?)',(session_id,provider,now,now))
+        cursor=db.conn.execute('INSERT INTO flow_provider_connections(id,session_id,provider,connected_at,last_seen_at) '
+                               'VALUES(?,?,?,?,?)',(identity,session_id,provider,now,now))
     return cursor.lastrowid
 
 
@@ -86,9 +91,11 @@ def start(db,old_provider,filters,gap_ids,*,session_id=None,ready_at=None,last_b
           'filters':filters,'gap_ids':gap_ids,'new_connected_at':None,
           'subscriptions_ready_at':None,'frozen_head':None,'uncertain_from':None,
           'uncertain_to':None,'recovery':None,'failure':None}
+    from app.flow_epochs import allocate
+    identity=allocate(db,'switch')
     with db.conn:
-        cursor=db.conn.execute('INSERT INTO flow_provider_switches(session_id,state,payload) '
-                               'VALUES(?,?,?)',(session_id,'PRIMARY_DISCONNECTED' if old_provider=='publicnode'
+        cursor=db.conn.execute('INSERT INTO flow_provider_switches(id,session_id,state,payload) '
+                               'VALUES(?,?,?,?)',(identity,session_id,'PRIMARY_DISCONNECTED' if old_provider=='publicnode'
                                                   else 'FALLBACK_DISCONNECTED',json.dumps(item,sort_keys=True)))
     return cursor.lastrowid,item
 

@@ -144,6 +144,12 @@ def save_progress(runner,switch_id,attempt,stop=None):
 
 
 def transport(db,row,now):
+    epoch=db.epoch()
+    if (epoch and epoch['status']=='QUARANTINED' and
+        json.loads(epoch['incident_json'])['switch_id']==row['id']):
+        # Forensic HTTP proof has no current WSS handoff. All original identity,
+        # bounded budgets, pinned head and contiguous-range checks still apply.
+        return
     connection=db.conn.execute('SELECT * FROM flow_provider_connections WHERE session_id IS ? '
                               'ORDER BY id DESC LIMIT 1',(row['session_id'],)).fetchone()
     if (switch.pending(db,row['session_id']) or db.state('connection_state')!='connected' or

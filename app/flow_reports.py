@@ -38,7 +38,7 @@ def usage(db,settings,hours=24,now=None,providers=None):
     if hours<=0:raise ValueError('Hours must be positive')
     now=time.time() if now is None else now;since=now-hours*3600
     c=db.conn
-    counters=dict(c.execute('SELECT metric,sum(count) FROM flow_usage WHERE minute>=? GROUP BY metric',(int(since)//60*60,)))
+    counters=dict(db.budget_conn.execute('SELECT metric,sum(count) FROM flow_usage WHERE minute>=? GROUP BY metric',(int(since)//60*60,)))
     for metric in ('flow_http_calls','flow_eth_getLogs','flow_eth_getBlockByNumber','flow_eth_call','flow_eth_getTransactionByHash',
                    'flow_eth_getTransactionReceipt','flow_ws_bytes','flow_duplicate_events','flow_removed_events','flow_subscription_reconnects',
                    'flow_curve_buy_events','flow_curve_sell_events','flow_v4_swap_events','flow_hook_fee_events'):

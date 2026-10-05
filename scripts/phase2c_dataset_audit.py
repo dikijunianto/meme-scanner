@@ -93,11 +93,17 @@ def screen(values, seed):
 
 @contextmanager
 def open_readonly(main_path, flow_path):
+    from app.flow_epochs import active_path
+    catalog_uri=Path(flow_path).resolve().as_uri()+'?mode=ro'
+    catalog=sqlite3.connect(catalog_uri,uri=True,timeout=2)
+    try:flow_path=active_path(catalog,flow_path)
+    finally:catalog.close()
     main_uri = Path(main_path).resolve().as_uri() + '?mode=ro'
     flow_uri = Path(flow_path).resolve().as_uri() + '?mode=ro'
     db = sqlite3.connect(main_uri, uri=True, timeout=2)
     db.row_factory = sqlite3.Row
     db.execute('ATTACH DATABASE ? AS flow', (flow_uri,))
+    db.execute('ATTACH DATABASE ? AS collection', (catalog_uri,))
     db.execute('PRAGMA query_only=ON')
     db.execute('BEGIN')
     try:
@@ -105,6 +111,7 @@ def open_readonly(main_path, flow_path):
     finally:
         db.rollback()
         db.execute('DETACH DATABASE flow')
+        db.execute('DETACH DATABASE collection')
         db.close()
 
 

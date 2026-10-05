@@ -295,6 +295,13 @@ def pair_audit(db, windows, as_of, legacy_end, split_start):
 
 def ledger_audit(db,as_of):
     """Only prospective, immutable first-eligible versions can enter model counts."""
+    epoch=None
+    if (any(r[1]=='collection' for r in db.execute('PRAGMA database_list')) and
+        db.execute("SELECT 1 FROM collection.sqlite_master WHERE name='flow_collection_epochs'").fetchone()):
+        epoch=db.execute("SELECT * FROM collection.flow_collection_epochs WHERE status='ACTIVE'").fetchone()
+        if not epoch:
+            return {'collection_epoch':None,'primary_eligible':False,'first_eligible_versions':0,
+                    'model_readiness':chronological_readiness([],True)}
     if not db.execute("SELECT 1 FROM flow.sqlite_master WHERE name='flow_feature_ledger_start'").fetchone():
         return {'boundary':None,'launches':0,'complete_windows':0,'first_eligible_versions':0,
                 'usable_by_pair':{},'days_of_history':0,'model_readiness':chronological_readiness([],True)}
@@ -303,11 +310,13 @@ def ledger_audit(db,as_of):
         return {'boundary':None,'launches':0,'complete_windows':0,'first_eligible_versions':0,
                 'usable_by_pair':{},'days_of_history':0,'model_readiness':chronological_readiness([],True)}
     versions={}
-    for r in db.execute('''SELECT v.*,t.tracking_start_at,t.graduation_json FROM flow.flow_feature_versions v
+    for r in db.execute(f'''SELECT v.*,t.tracking_start_at,{'t.launch_block' if epoch else 'NULL'} AS launch_block,t.graduation_json FROM flow.flow_feature_versions v
         JOIN flow.flow_tracking_targets t USING(launch_id)
         WHERE t.tracking_start_at>=? AND v.materialized_at<=? AND v.feature_schema_version='v1'
         ORDER BY v.launch_id,v.window_seconds,v.version_number''',(start['start_at'],as_of)):
         key=(r['launch_id'],r['window_seconds'])
+        if epoch and (not epoch['pit_eligible'] or r['launch_block']<epoch['start_block'] or
+                      json.loads(r['proof_json']).get('collection_epoch_id')!=epoch['epoch_id']):continue
         if key not in versions and r['coverage_quality']=='complete' and r['model_eligible_at'] is not None and r['model_eligible_at']<=as_of:
             graduation=json.loads(r['graduation_json']) if r['graduation_json'] else None
             if graduation and base.stamp(graduation['block_timestamp'])<=r['feature_cutoff_at']:
@@ -399,12 +408,21 @@ def ledger_audit(db,as_of):
         JOIN flow.flow_tracking_targets t USING(launch_id)
         WHERE t.tracking_start_at>=? AND v.coverage_quality='complete' AND v.materialized_at<=?''',
         (start['start_at'],as_of)).fetchone()[0]
-    return {'boundary':{'start_utc':utc(start['start_at']),'start_block':start['start_block'],
+    readiness=chronological_readiness(model_rows,True)
+    if epoch and (db.execute('SELECT 1 FROM flow.flow_gaps WHERE resolved=0 LIMIT 1').fetchone() or
+                  db.execute("SELECT 1 FROM flow.flow_provider_switches WHERE state!='HEALTHY' LIMIT 1").fetchone()):
+        readiness['unmet_conditions'].append('current_epoch_unresolved_proof')
+        readiness['status']='MODEL_DATA_NOT_MATURE'
+    if epoch and (as_of-epoch['start_block_timestamp'])/86400<60:
+        readiness['unmet_conditions'].append('clean_epoch_elapsed_days_below_60')
+        readiness['status']='MODEL_DATA_NOT_MATURE'
+    return {'collection_epoch':dict(epoch) if epoch else None,
+            'boundary':{'start_utc':utc(start['start_at']),'start_block':start['start_block'],
                         'deploy_revision':start['deploy_revision']},'launches':launches,
             'complete_windows':complete,'first_eligible_versions':len(versions),
             'graduation_selection_bias':bias,
             'usable_by_pair':pair_counts,'days_of_history':(as_of-start['start_at'])/86400,
-            'model_readiness':chronological_readiness(model_rows,True)}
+            'model_readiness':readiness}
 
 
 def audit(db, as_of, session_id=base.SESSION):

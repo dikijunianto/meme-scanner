@@ -144,11 +144,36 @@ def decode_event(log, target, graduation=None):
 
 
 class FlowDB:
-    def __init__(self,path,readonly=False):
+    def __init__(self,path,readonly=False,follow_epoch=True):
         self.path=Path(path)
         self.conn=sqlite3.connect(self.path.resolve().as_uri()+'?mode=ro' if readonly else str(path),uri=readonly,timeout=2)
         self.conn.row_factory=sqlite3.Row
         self.conn.execute('PRAGMA busy_timeout=2000')
+        from app.flow_epochs import active_path
+        self.catalog_conn=self.conn
+        if follow_epoch:
+            selected=active_path(self.conn,self.path)
+            if selected.resolve()!=self.path.resolve():
+                if not selected.is_file():raise ValueError('Active epoch database is missing; never recreate it implicitly')
+                self.path=selected
+                self.conn=sqlite3.connect(selected.resolve().as_uri()+'?mode=ro' if readonly else str(selected),uri=readonly,timeout=2)
+                self.conn.row_factory=sqlite3.Row
+        # An explicitly opened epoch partition still shares the original budget
+        # ledger. Read-only opening never initializes or migrates a catalog.
+        if self.catalog_conn is self.conn and self.conn.execute("SELECT 1 FROM sqlite_master WHERE name='flow_state'").fetchone():
+            catalog=self.state('epoch_catalog_path')
+            if catalog:
+                self.catalog_conn=sqlite3.connect(Path(catalog).as_uri()+'?mode=ro' if readonly else catalog,uri=readonly,timeout=2)
+                self.catalog_conn.row_factory=sqlite3.Row
+        self.budget_conn=self.catalog_conn
+
+    def epoch(self):
+        from app.flow_epochs import row
+        return row(self.catalog_conn,self.path)
+
+    def close(self):
+        self.conn.close()
+        if self.catalog_conn is not self.conn:self.catalog_conn.close()
 
     def migrate(self):
         self.conn.execute('PRAGMA journal_mode=WAL')
@@ -234,6 +259,10 @@ class FlowDB:
                               (at,block,revision))
 
     def _append_feature_version(self,target,row,reason):
+        epoch=self.epoch()
+        if epoch and (epoch['status']!='ACTIVE' or target['tracking_start_at']<epoch['start_block_timestamp'] or
+                      target['launch_block']<epoch['start_block']):
+            return
         start=self.conn.execute('SELECT * FROM flow_feature_ledger_start WHERE id=1').fetchone()
         if not start or target['tracking_start_at']<start['start_at']:
             return
@@ -255,6 +284,11 @@ class FlowDB:
                           'cursor':int(cursor) if cursor is not None else None})
         ready=(row['coverage_quality']=='complete' and
                all(p['bootstrap_status']=='complete' and p['cursor'] is not None for p in proof))
+        if epoch:
+            from app.flow_provider_switch import pending,blocked
+            seal=json.loads(epoch['boundary_json']).get('live_seal')
+            ready=(ready and bool(epoch['pit_eligible']) and bool(seal) and not pending(self) and not blocked(self)
+                   and not self.conn.execute('SELECT 1 FROM flow_gaps WHERE resolved=0 LIMIT 1').fetchone())
         incidents=[];fresh_incidents=[]
         for incident_row in self.conn.execute("SELECT key,value FROM flow_state WHERE key LIKE 'pit_collection_incident:%'"):
             incident=json.loads(incident_row['value'])
@@ -284,11 +318,14 @@ class FlowDB:
                     'rebuild')
         at=time.time()
         proved=at if ready else None
+        if ready and epoch:
+            proved=max(at,seal['proved_at'],*(p['completed_at'] for p in proof))
         evidence={'window_end_at':row['feature_cutoff_at'],'coverage_start_at':row['coverage_start_at'],
                   'coverage_end_at':row['coverage_end_at'],'filters':proof,
                   'lifecycle_state_at_cutoff':'graduated' if len(intervals)>1 else 'curve',
                   'required_filter_set_hash':filter_hash,
                   'proof_source':'existing_bootstrap_and_recovery_cursors' if ready else 'incomplete_or_unknown'}
+        if epoch:evidence['collection_epoch_id']=epoch['epoch_id']
         if incidents:evidence['incident_reconstruction_not_pit_safe']=incidents
         self.conn.execute('''INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                           (launch,window,1+(prior['version_number'] if prior else 0),FEATURE_SCHEMA_VERSION,
@@ -354,10 +391,10 @@ class FlowDB:
 
     def count(self,metric,n=1,now=None):
         minute=int(now if now is not None else time.time())//60*60
-        with self.conn:self.conn.execute('INSERT INTO flow_usage VALUES(?,?,?) ON CONFLICT(minute,metric) DO UPDATE SET count=count+excluded.count',(minute,metric,n))
+        with self.budget_conn:self.budget_conn.execute('INSERT INTO flow_usage VALUES(?,?,?) ON CONFLICT(minute,metric) DO UPDATE SET count=count+excluded.count',(minute,metric,n))
 
     def used(self,metric,since):
-        return self.conn.execute('SELECT coalesce(sum(count),0) FROM flow_usage WHERE metric=? AND minute>=?',(metric,since)).fetchone()[0]
+        return self.budget_conn.execute('SELECT coalesce(sum(count),0) FROM flow_usage WHERE metric=? AND minute>=?',(metric,since)).fetchone()[0]
 
     def gap(self,launch_id,start,end,reason,first_block=None):
         with self.conn:

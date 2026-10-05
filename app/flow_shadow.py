@@ -63,7 +63,7 @@ class ShadowRpc(FlowRpc):
         logs = sum(x['method'] == 'eth_getLogs' for x in members)
         now = int(time.time())
         day, minute = now // 86400 * 86400, now // 60 * 60
-        self.db.conn.execute('BEGIN IMMEDIATE')
+        self.db.budget_conn.execute('BEGIN IMMEDIATE')
         try:
             if self.db.used('flow_rpc_members', day) + n > self.settings.daily_calls:
                 raise BudgetWait('daily_rpc',self.db.used('flow_rpc_members',day),self.settings.daily_calls,day+86400)
@@ -85,15 +85,17 @@ class ShadowRpc(FlowRpc):
             for item in members:
                 metrics.append(('flow_' + item['method'], 1))
             for name, count in metrics:
-                self.db.conn.execute('INSERT INTO flow_usage VALUES(?,?,?) ON CONFLICT(minute,metric) DO UPDATE SET count=count+excluded.count',
+                self.db.budget_conn.execute('INSERT INTO flow_usage VALUES(?,?,?) ON CONFLICT(minute,metric) DO UPDATE SET count=count+excluded.count',
                                      (minute, name, count))
             if self.job and logs:
                 self.db.conn.execute('''UPDATE flow_shadow_jobs SET actual_getlogs_calls=actual_getlogs_calls+?,
                   retries=retries+? WHERE stage=? AND launch_id=? AND kind=?''',
                   (logs, int(self.attempt > 1), *self.job))
-            self.db.conn.commit()
+            self.db.budget_conn.commit()
+            if self.db.conn is not self.db.budget_conn:self.db.conn.commit()
         except BaseException:
-            self.db.conn.rollback()
+            self.db.budget_conn.rollback()
+            if self.db.conn is not self.db.budget_conn:self.db.conn.rollback()
             raise
         return await Rpc._send(self, payload, method)
 
