@@ -260,7 +260,7 @@ class FlowDB:
 
     def _append_feature_version(self,target,row,reason):
         epoch=self.epoch()
-        if epoch and (epoch['status']!='ACTIVE' or target['tracking_start_at']<epoch['start_block_timestamp'] or
+        if epoch and (epoch['status'] not in ('ACTIVATING','ACTIVE') or target['tracking_start_at']<epoch['start_block_timestamp'] or
                       target['launch_block']<epoch['start_block']):
             return
         start=self.conn.execute('SELECT * FROM flow_feature_ledger_start WHERE id=1').fetchone()
@@ -287,7 +287,7 @@ class FlowDB:
         if epoch:
             from app.flow_provider_switch import pending,blocked
             seal=json.loads(epoch['boundary_json']).get('live_seal')
-            ready=(ready and bool(epoch['pit_eligible']) and bool(seal) and not pending(self) and not blocked(self)
+            ready=(ready and epoch['status']=='ACTIVE' and bool(epoch['pit_eligible']) and bool(seal) and not pending(self) and not blocked(self)
                    and not self.conn.execute('SELECT 1 FROM flow_gaps WHERE resolved=0 LIMIT 1').fetchone())
         incidents=[];fresh_incidents=[]
         for incident_row in self.conn.execute("SELECT key,value FROM flow_state WHERE key LIKE 'pit_collection_incident:%'"):
@@ -387,6 +387,10 @@ class FlowDB:
         return r[0] if r else default
 
     def set_state(self,key,value):
+        if key=='recovery_state' and value=='healthy':
+            epoch=self.epoch()
+            if epoch and (epoch['status']!='ACTIVE' or not epoch['pit_eligible']):
+                value='bootstrap_required'
         with self.conn:self.conn.execute('INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,str(value)))
 
     def count(self,metric,n=1,now=None):

@@ -46,6 +46,8 @@ class CursorBootstrap:
                 if end<base:continue
                 cursor=self.db.state(f'recovery:{target["launch_id"]}:{kind}')
                 start=self.runner.historical_start(target,kind,base,end)
+                if target['graduation_json'] and (self.db.epoch() or {}).get('status')=='ACTIVATING' and stage.startswith('live_graduation:'):
+                    start=base  # Independent full lifecycle proof while research remains sealed.
                 if self.db.needs_bootstrap(target['launch_id'],kind):
                     self.db.require_bootstrap(target,kind,base)
                     if start!=base:raise RpcError('Missing-cursor bootstrap must start at activation')
@@ -119,10 +121,11 @@ class CursorBootstrap:
         with self.db.conn:
             for job,target,upper_at in checked:
                 launch,kind,head=job['launch_id'],job['kind'],job['reconciliation_upper_bound']
-                state=self.db.conn.execute('SELECT safe_start,status FROM flow_bootstrap WHERE launch_id=? AND kind=?',
+                state=self.db.conn.execute('SELECT safe_start,status,completed_head FROM flow_bootstrap WHERE launch_id=? AND kind=?',
                                            (launch,kind)).fetchone()
                 cursor=self.db.state(f'recovery:{launch}:{kind}')
-                if self.db.needs_bootstrap(launch,kind) or (state and state['status']!='complete'):
+                if (self.db.needs_bootstrap(launch,kind) or (state and state['status']!='complete') or
+                    (state and job['original_safe_start']==state['safe_start'] and head>state['completed_head'])):
                     graduation=json.loads(target['graduation_json']) if target['graduation_json'] else None
                     base=graduation['block_number'] if graduation and kind!='curve' else target['launch_block']
                     if not state or state['safe_start']!=base or job['original_safe_start']!=base:

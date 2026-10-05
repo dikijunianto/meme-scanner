@@ -21,8 +21,8 @@ IDs across partitions under a transaction. Schema creation is transactional and
 idempotent. Creation of a new partition is exclusive: an interrupted orphan is
 never truncated or silently reused. An existing active boundary is never reset.
 
-ACTIVE means current ownership; `pit_eligible=0` means activation proof is still
-pending. The fixed Validation header is fresh, chain 4663, number/hash matched,
+ACTIVATING means current ownership without eligibility. ACTIVE follows the
+atomic proof-backed live seal with `pit_eligible=1`. The fixed Validation header is fresh, chain 4663, number/hash matched,
 and retained before the pointer is published. No current cursor is copied.
 Canonical discovery and required-filter bootstrap use the existing worker paths.
 Every missing curve/V4/hook cursor is explicit bootstrap, never normal >100
@@ -80,69 +80,12 @@ actual full proof may subsequently mark that historical switch healthy. It never
 changes the active partition, its PIT versions or its maturity clock. Budget
 usage is shared, so optional forensic recovery must not starve current collection.
 
-## Future operational activation — do not execute in this phase
+## Replacement operational activation protocol
 
-1. Obtain authorization for this operational stage. Retain a fresh read-only
-   snapshot of main PID/start/NRestarts, flow PID/start/NRestarts, exact clean
-   deployed HEAD, original switch 17 raw payload/hash/FAILED/NULL head/two
-   obligations, all immutable versions, protected target 272959, database
-   integrity, routing fingerprints, security modes and new-era isolation.
-   Verify protected configuration 0600, parent 0700, ubuntu readability and
-   offline split validation. Preserve original Phase 2C.3j evidence and all four
-   era boundaries. No historical recovery is necessary.
-2. Budget preflight: Validation only; shared UTC getLogs <=400, RPC <=1000,
-   minute <=12, reserve >=50, pacing unchanged. Require room for three boundary
-   RPC members plus bootstrap/head/header/tail work. Read canonical relevant
-   launches and sampling membership before stopping; estimate per-filter proof
-   cost at a fresh operational head. Do not count recovered legacy ranges or
-   old cursors as new-epoch proof. If safe capacity is insufficient, defer the
-   stop rather than spending the reserve. Main stays untouched throughout.
-3. With durable intent/before evidence, stop flow exactly once and verify the
-   retained old PID is gone and the unit inactive. Do not use `restart` plus an
-   additional stop/start. The single controlled stop/start activates source.
-4. In the expected clean deployed checkout, as the same service account and
-   under its protected environment, run the following future command once:
-
-   ```text
-   /opt/meme-scanner/.venv/bin/python -m scripts.flow_epoch_prepare --old-flow-pid <retained-old-PID> --epoch-id GENERALIZED_BOOTSTRAP_EPOCH_2
-   ```
-
-   It checks main active/flow inactive/old PID gone, holds the configured flow
-   writer lock, transactionally registers/quarantines epoch 1 without changing
-   switch 17, validates fresh Validation chain/head/header, creates the fresh
-   partition and publishes a pending ACTIVE epoch. It runs no getLogs. Do not
-   rerun after an interruption without inspecting the catalog/orphan evidence;
-   inspect an existing pending epoch and resume its original boundary.
-5. Retain the exact new header/capture/creation UTC and source revision. Epoch
-   2's block/time are intentionally unknown in this source task. Start flow once
-   from the expected checkout. Confirm PID/start/NRestarts, unchanged main,
-   split/PublicNode primary/Validation fallback+HTTP, and shared budgets.
-   Natural fallback is permitted; no forced reconnect/failback. The worker
-   discovers every canonically relevant sampled launch, creates empty filter
-   state and proves safe_start through a fixed bootstrap head which includes
-   H_epoch_start, with subscription ACKs before an explicitly proved live tail.
-   New launches discovered during downtime use that same canonical path.
-   Earlier launches may need raw proof but cannot enter primary maturity.
-6. Observe durable `boundary_json.live_seal`, exact curve and applicable V4/hook
-   jobs/ranges/query identities, bootstrap completion before cursor, ACKed
-   normal recovery-tail records, zero current gaps/pending/failed switches,
-   healthy transport and then a natural fresh eligible PIT append. Compare
-   availability to label observation, protected earlier hashes and all retained
-   version keys. Do not claim success from a cursor/current COMPLETE alone.
-   Missing natural graduation remains pending. Keep epoch-1 debt separately
-   visible, FAILED/unresolved until optional proof actually completes.
-7. After validation, update aggregate/status documentation and daily monitoring
-   to the exact new partition and epoch boundary. Restart the primary 60-day
-   clock there, require 60 elapsed days plus chronological span, and accumulate
-   600 safe rows solely in epoch 2. No modeling or trading is authorized.
-
-Abort before stopping on changed service identity, dirty/unexpected source,
-security/routing mismatch, failed integrity, mutated PIT evidence or insufficient
-budget. After stopping, a bad/stale boundary or orphan file means remain stopped
-and retain evidence for operator review; never invent a boundary or reactivate
-the failed historical epoch. After starting, budget pauses retain the same fixed
-proof and no eligibility; an unproved >100 tail, failed recovery, new active gap,
-missing identity/proof, unexpected Alchemy/txreceipt or PIT mutation is an
-activation blocker. Do not auto-restart or automatically clear/quarantine fresh
-debt. Rollback requires explicit operator authorization, preserves all catalog,
-partition and proof records, and never resumes the old incident as clean data.
+The Phase 2C.4e operational ordering is superseded by
+[Phase 2C.4g activation protocol](phase2c4g-activation.md). That is the sole
+operational plan: prepare an ACTIVATING/PIT-ineligible epoch while stopped,
+start flow once while sealed, then canonical discovery, ACKed explicit bootstrap
+and startup-tail proof, atomic ACTIVE eligibility seal and natural fresh PIT.
+The earlier Phase 2C.4f pre-start completion invariant is not part of this
+replacement protocol. No production activation occurs during source deployment.

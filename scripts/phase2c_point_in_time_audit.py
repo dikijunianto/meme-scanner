@@ -298,7 +298,7 @@ def ledger_audit(db,as_of):
     epoch=None
     if (any(r[1]=='collection' for r in db.execute('PRAGMA database_list')) and
         db.execute("SELECT 1 FROM collection.sqlite_master WHERE name='flow_collection_epochs'").fetchone()):
-        epoch=db.execute("SELECT * FROM collection.flow_collection_epochs WHERE status='ACTIVE'").fetchone()
+        epoch=db.execute("SELECT * FROM collection.flow_collection_epochs WHERE status IN ('ACTIVATING','ACTIVE')").fetchone()
         if not epoch:
             return {'collection_epoch':None,'primary_eligible':False,'first_eligible_versions':0,
                     'model_readiness':chronological_readiness([],True)}
@@ -315,7 +315,7 @@ def ledger_audit(db,as_of):
         WHERE t.tracking_start_at>=? AND v.materialized_at<=? AND v.feature_schema_version='v1'
         ORDER BY v.launch_id,v.window_seconds,v.version_number''',(start['start_at'],as_of)):
         key=(r['launch_id'],r['window_seconds'])
-        if epoch and (not epoch['pit_eligible'] or r['launch_block']<epoch['start_block'] or
+        if epoch and (epoch['status']!='ACTIVE' or not epoch['pit_eligible'] or r['launch_block']<epoch['start_block'] or
                       json.loads(r['proof_json']).get('collection_epoch_id')!=epoch['epoch_id']):continue
         if key not in versions and r['coverage_quality']=='complete' and r['model_eligible_at'] is not None and r['model_eligible_at']<=as_of:
             graduation=json.loads(r['graduation_json']) if r['graduation_json'] else None

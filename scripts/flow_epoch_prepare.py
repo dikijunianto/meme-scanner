@@ -35,7 +35,7 @@ async def execute(args):
                 predecessor='GENERALIZED_BOOTSTRAP_EPOCH_1')
             if service('meme-scanner')!=main or service('meme-scanner-flow')!=flow:
                 raise ValueError('Service identity changed; keep flow stopped and inspect')
-            return {'epoch':epoch,'pit_eligible':False,'next':'start flow once; validate canonical discovery, ACKs, explicit bootstrap and tail before PIT'}
+            return {'epoch':epoch,'architecture':'SEALED_POSTSTART_BOOTSTRAP','pit_eligible':False,'next':'start flow once; validate canonical discovery, ACKs, explicit bootstrap and tail before PIT'}
         finally:
             if runner:
                 await runner.worker.rpc.close();runner.worker.main.close()

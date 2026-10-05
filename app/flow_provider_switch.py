@@ -8,7 +8,7 @@ from app.flow_data import BUY,SELL
 
 def pending(db,session_id=None):
     epoch=db.epoch()
-    if epoch and epoch['status']!='ACTIVE':return None
+    if epoch and epoch['status'] not in ('ACTIVATING','ACTIVE'):return None
     row=db.conn.execute("SELECT * FROM flow_provider_switches WHERE state NOT IN ('HEALTHY','FAILED') "
                         "AND (? OR session_id IS ?) ORDER BY id DESC LIMIT 1",(bool(epoch),session_id)).fetchone()
     return dict(row) if row else None
@@ -22,7 +22,7 @@ def latest(db,session_id=None):
 
 def blocked(db,session_id=None):
     epoch=db.epoch()
-    if epoch and epoch['status']!='ACTIVE':return False
+    if epoch and epoch['status'] not in ('ACTIVATING','ACTIVE'):return False
     return bool(db.conn.execute("SELECT 1 FROM flow_provider_switches WHERE (? OR session_id IS ?) AND state='FAILED' LIMIT 1",(bool(epoch),session_id)).fetchone())
 
 
