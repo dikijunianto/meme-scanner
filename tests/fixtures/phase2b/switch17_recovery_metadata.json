@@ -1,0 +1,285 @@
+{
+  "switch17": {
+    "id": 17,
+    "session_id": "1eb525a3fe2a41b2bab1b5bf8dca4a9a",
+    "state": "FAILED",
+    "payload": {
+      "created_at": 1790955170.6994033,
+      "disconnect_attempts": 1,
+      "failed_at": 1790955173.489784,
+      "failure": "FlowBudget",
+      "filter_snapshot_at": 1790955170.6994033,
+      "filters": [
+        {
+          "base": 78323288,
+          "cursor": "78323387",
+          "kind": "curve",
+          "launch_id": 293330
+        },
+        {
+          "base": 78340692,
+          "cursor": "78340786",
+          "kind": "curve",
+          "launch_id": 293506
+        }
+      ],
+      "first_disconnect_at": 1790955170.6994033,
+      "frozen_head": null,
+      "gap_ids": [
+        728,
+        729
+      ],
+      "last_disconnect_at": 1790955170.6994033,
+      "last_old_block": "78340786",
+      "new_connected_at": 1790955172.8030667,
+      "new_connection_id": 39,
+      "new_provider": "validation",
+      "old_provider": "validation",
+      "old_subscription_ready_at": 1790918036.0935044,
+      "recovery": null,
+      "subscriptions_ready_at": 1790955173.4398735,
+      "uncertain_from": null,
+      "uncertain_to": null
+    },
+    "payload_sha256": "738d6cf76a02892eb832fe51bf3fbc7905b209d3cb0abfe2a68270fcf454fc2d"
+  },
+  "budget": {
+    "getlogs": 0,
+    "rpc": 10,
+    "minute_rpc": 0,
+    "getlogs_limit": 400,
+    "rpc_limit": 1000,
+    "minute_limit": 12,
+    "envelopes_per_second": 0.5,
+    "reserve": 50,
+    "as_of_day_utc": "2026-10-05T07:00:00+07:00"
+  },
+  "provenance": "Phase 2C.4c retained metadata only; checkpoint is an offline estimate endpoint, never a reconciliation head",
+  "filters": [
+    {
+      "snapshot": {
+        "base": 78323288,
+        "cursor": "78323387",
+        "kind": "curve",
+        "launch_id": 293330
+      },
+      "target": {
+        "launch_id": 293330,
+        "token_address": "0x07A96Ce6AfFCba7FcD69Be0b0D1832dD4a4261B6",
+        "quote_asset_address": "0x1b0E319c6A659F002271B69dB8A7df2F911c153E",
+        "curve_address": "0xbb492F4d41EEEf5f22d0DBb7381dc47377E34b77",
+        "launch_block": 78323288,
+        "launch_log_index": 129,
+        "graduation_json": null,
+        "status": "partial",
+        "tracking_start_at": 1790953386.0,
+        "tracking_end_at": 1790956986.0
+      },
+      "launch": {
+        "id": 293330,
+        "token_address": "0x07A96Ce6AfFCba7FcD69Be0b0D1832dD4a4261B6",
+        "quote_asset_address": "0x1b0E319c6A659F002271B69dB8A7df2F911c153E",
+        "curve_address": "0xbb492F4d41EEEf5f22d0DBb7381dc47377E34b77",
+        "block_number": 78323288,
+        "log_index": 129,
+        "block_timestamp": "2026-10-02T22:03:07+07:00"
+      },
+      "bootstrap": [
+        {
+          "launch_id": 293330,
+          "kind": "curve",
+          "safe_start": 78323288,
+          "status": "complete",
+          "completed_head": 78323321,
+          "created_at": 1790953389.7498493,
+          "completed_at": 1790953394.1845446
+        }
+      ],
+      "cursor": "78323387",
+      "gaps": [
+        {
+          "id": 726,
+          "launch_id": 293330,
+          "start_at": 1790953386.0,
+          "end_at": 1790953386.0,
+          "reason": "bootstrap_required:curve",
+          "resolved": 1,
+          "first_block": 78323288
+        },
+        {
+          "id": 728,
+          "launch_id": 293330,
+          "start_at": 1790955165.5923991,
+          "end_at": 1790955170.6994033,
+          "reason": "ws_gap",
+          "resolved": 0,
+          "first_block": 78340786
+        },
+        {
+          "id": 730,
+          "launch_id": 293330,
+          "start_at": 1790955165.5923991,
+          "end_at": 1790955863.202837,
+          "reason": "ws_gap",
+          "resolved": 0,
+          "first_block": 78340786
+        }
+      ],
+      "jobs": [
+        {
+          "stage": "live_bootstrap:293330",
+          "launch_id": 293330,
+          "kind": "curve",
+          "original_safe_start": 78323288,
+          "reconciliation_upper_bound": 78323321,
+          "next_unverified_block": 78323322,
+          "highest_contiguous_verified_block": 78323321,
+          "span": 2000,
+          "actual_getlogs_calls": 1,
+          "retries": 0,
+          "range_reductions": 0,
+          "recovered_raw_events": 0,
+          "duplicates_ignored": 0,
+          "failed_from": null,
+          "failed_to": null,
+          "failed_error": null,
+          "completion_status": "complete"
+        }
+      ],
+      "ranges": [
+        {
+          "stage": "live_bootstrap:293330",
+          "launch_id": 293330,
+          "kind": "curve",
+          "first_block": 78323288,
+          "last_block": 78323321,
+          "was_terminal": 1
+        }
+      ],
+      "query_identity": [
+        {
+          "stage": "live_bootstrap:293330",
+          "launch_id": 293330,
+          "kind": "curve",
+          "query_json": "{\"address\":\"0xbb492F4d41EEEf5f22d0DBb7381dc47377E34b77\",\"topics\":[[\"0xec36bf571f136799e8dc0b0b8bea4b04d8bd3d43de838aab0d5fc21d4cbfc455\",\"0x8113d738abdcb6b38357e9d53a54a7157861a09031b453651f0fe7fe151f59df\"]]}",
+          "upper_at": 1790953390.0
+        }
+      ]
+    },
+    {
+      "snapshot": {
+        "base": 78340692,
+        "cursor": "78340786",
+        "kind": "curve",
+        "launch_id": 293506
+      },
+      "target": {
+        "launch_id": 293506,
+        "token_address": "0x1050308b7117914e2D2F8E3Fd6E11D9383A5Bc4e",
+        "quote_asset_address": "0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35",
+        "curve_address": "0x419a0b48206f25cEf6Ad18D47a95134C5613901A",
+        "launch_block": 78340692,
+        "launch_log_index": 7,
+        "graduation_json": null,
+        "status": "partial",
+        "tracking_start_at": 1790955135.0,
+        "tracking_end_at": 1790956035.0
+      },
+      "launch": {
+        "id": 293506,
+        "token_address": "0x1050308b7117914e2D2F8E3Fd6E11D9383A5Bc4e",
+        "quote_asset_address": "0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35",
+        "curve_address": "0x419a0b48206f25cEf6Ad18D47a95134C5613901A",
+        "block_number": 78340692,
+        "log_index": 7,
+        "block_timestamp": "2026-10-02T22:32:15+07:00"
+      },
+      "bootstrap": [
+        {
+          "launch_id": 293506,
+          "kind": "curve",
+          "safe_start": 78340692,
+          "status": "complete",
+          "completed_head": 78340720,
+          "created_at": 1790955137.8413932,
+          "completed_at": 1790955142.293269
+        }
+      ],
+      "cursor": "78340786",
+      "gaps": [
+        {
+          "id": 727,
+          "launch_id": 293506,
+          "start_at": 1790955135.0,
+          "end_at": 1790955135.0,
+          "reason": "bootstrap_required:curve",
+          "resolved": 1,
+          "first_block": 78340692
+        },
+        {
+          "id": 729,
+          "launch_id": 293506,
+          "start_at": 1790955165.5923991,
+          "end_at": 1790955170.6994033,
+          "reason": "ws_gap",
+          "resolved": 0,
+          "first_block": 78340786
+        },
+        {
+          "id": 731,
+          "launch_id": 293506,
+          "start_at": 1790955165.5923991,
+          "end_at": 1790955863.202837,
+          "reason": "ws_gap",
+          "resolved": 0,
+          "first_block": 78340786
+        }
+      ],
+      "jobs": [
+        {
+          "stage": "live_bootstrap:293506",
+          "launch_id": 293506,
+          "kind": "curve",
+          "original_safe_start": 78340692,
+          "reconciliation_upper_bound": 78340720,
+          "next_unverified_block": 78340721,
+          "highest_contiguous_verified_block": 78340720,
+          "span": 2000,
+          "actual_getlogs_calls": 1,
+          "retries": 0,
+          "range_reductions": 0,
+          "recovered_raw_events": 0,
+          "duplicates_ignored": 0,
+          "failed_from": null,
+          "failed_to": null,
+          "failed_error": null,
+          "completion_status": "complete"
+        }
+      ],
+      "ranges": [
+        {
+          "stage": "live_bootstrap:293506",
+          "launch_id": 293506,
+          "kind": "curve",
+          "first_block": 78340692,
+          "last_block": 78340720,
+          "was_terminal": 1
+        }
+      ],
+      "query_identity": [
+        {
+          "stage": "live_bootstrap:293506",
+          "launch_id": 293506,
+          "kind": "curve",
+          "query_json": "{\"address\":\"0x419a0b48206f25cEf6Ad18D47a95134C5613901A\",\"topics\":[[\"0xec36bf571f136799e8dc0b0b8bea4b04d8bd3d43de838aab0d5fc21d4cbfc455\",\"0x8113d738abdcb6b38357e9d53a54a7157861a09031b453651f0fe7fe151f59df\"]]}",
+          "upper_at": 1790955138.0
+        }
+      ]
+    }
+  ],
+  "comparison_endpoint": {
+    "key": "live_checkpoint",
+    "value": "80845035",
+    "updated_at": "2026-10-05T21:10:14+07:00"
+  }
+}

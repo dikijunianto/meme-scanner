@@ -66,6 +66,20 @@ class OfflineDrainTests(unittest.IsolatedAsyncioTestCase):
     def guard(self):
         if self.active: raise OfflineAbort('Flow active')
 
+    async def test_checksum_identity_reuses_maintenance_proof_without_rewriting_query(self):
+        display='0x'+'aB'*20
+        with self.db.conn:self.db.conn.execute('UPDATE flow_tracking_targets SET curve_address=? WHERE launch_id=1',(display,))
+        manifest={'snapshot':self.runner.snapshot(),'reused':[]}
+        self.runner.plan(manifest,self.head,1100,'fixture:original')
+        self.assertTrue(await self.runner.run_stage('fixture:original'))
+        raw=self.db.conn.execute('SELECT query_json FROM flow_bootstrap_identity WHERE stage=?',('fixture:original',)).fetchone()[0]
+        with self.db.conn:self.db.conn.execute('UPDATE flow_tracking_targets SET curve_address=? WHERE launch_id=1',(display.lower(),))
+        self.runner.check_snapshot(manifest)
+        self.runner.plan(manifest,self.head,1100,'fixture:reuse')
+        self.assertTrue(await self.runner.run_stage('fixture:reuse'))
+        self.assertEqual(len(self.calls),1)
+        self.assertEqual(self.db.conn.execute('SELECT query_json FROM flow_bootstrap_identity WHERE stage=?',('fixture:original',)).fetchone()[0],raw)
+
     async def test_split_large_production_debt_multiple_gaps_and_manifest(self):
         for launch, offset in ((2,10000),(3,25000)):
             t = target(launch=launch); t['launch_block'] = self.base+offset

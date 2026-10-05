@@ -637,8 +637,8 @@ class FlowWorker:
             with self.db.conn:
                 for row in self.db.conn.execute("SELECT key,value FROM flow_state WHERE key LIKE 'pit_collection_incident:%'").fetchall():
                     incident=json.loads(row['value'])
-                    if incident['PIT_COLLECTION_RECOVERY_END'] is None:
-                        incident['PIT_COLLECTION_RECOVERY_END']=time.time()
+                    if incident['PIT_COLLECTION_RECOVERY_END'] is None and incident.get('runtime_healthy_at') is None:
+                        incident['runtime_healthy_at']=time.time()
                         self.db.conn.execute('UPDATE flow_state SET value=? WHERE key=?',(json.dumps(incident),row['key']))
 
     def drain(self):

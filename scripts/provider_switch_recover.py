@@ -12,9 +12,20 @@ from app.flow_providers import FlowProviders,provider
 from app.flow_provider_switch import latest,pending,resume_proved_failure,reconcile_zero_filter_failure,value
 from app.flow_shadow import make_reconciler,verified_checkout
 from app.flow_worker import FlowSettings
+from app.flow_identity import canonical_address
 
 
 async def recover(identity,handoff=False,conservative_later_head=False):
+    # Native advisory lock serializes operator invocations, not the live worker.
+    import fcntl
+    import tempfile
+    from pathlib import Path
+    with (Path(tempfile.gettempdir())/'meme-scanner-switch-recovery.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        return await _recover(identity,handoff,conservative_later_head)
+
+
+async def _recover(identity,handoff=False,conservative_later_head=False):
     from scripts.phase2b2_shadow import service
     revision=verified_checkout()
     services={u:service(u) for u in ('meme-scanner','meme-scanner-flow')}
@@ -55,7 +66,7 @@ async def recover(identity,handoff=False,conservative_later_head=False):
             target=db.target(f['launch_id'])
             launch=runner.worker.main.execute('SELECT * FROM launches WHERE id=?',(f['launch_id'],)).fetchone()
             if (not target or not launch or f['kind']!='curve' or target['graduation_json'] or
-                target['launch_block']!=f['base'] or target['curve_address'].lower()!=launch['curve_address'].lower()):
+                target['launch_block']!=f['base'] or canonical_address(target['curve_address'])!=canonical_address(launch['curve_address'])):
                 raise ValueError('Immutable curve identity mismatch')
         before=runner.summary(stage)
         if conservative_later_head:

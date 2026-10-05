@@ -7,6 +7,7 @@ import time
 from app.flow_providers import provider
 from app.flow_shadow import ShadowReconciler, ShadowRpc, SHADOW_SPAN
 from app.flow_worker import RECOVERY_MAX_BLOCKS, FlowBudget
+from app.flow_identity import canonical_address, compatible_ranges, query_identity
 
 
 def canonical(value):
@@ -157,7 +158,8 @@ class OfflineDrain(ShadowReconciler):
             old = saved.get(target['launch_id'])
             if self.live(target) and old is None:
                 raise OfflineAbort('Maintenance target set changed')
-            if old and (any(target[k] != old[k] for k in fields) or
+            if old and (any((canonical_address(target[k]) != canonical_address(old[k])
+                if k in ('token_address','curve_address') else target[k] != old[k]) for k in fields) or
                 old['graduation_digest'] != hashlib.sha256((target['graduation_json'] or '').encode()).hexdigest()):
                 raise OfflineAbort('Maintenance target identity changed')
 
@@ -168,15 +170,7 @@ class OfflineDrain(ShadowReconciler):
 
     def reusable(self, launch, kind, query, first, last):
         # Identity-free recovery/switch ranges and WSS cursors are not reusable proof.
-        identity = canonical(query)
-        return [dict(r) for r in self.db.conn.execute("""SELECT r.* FROM flow_shadow_ranges r
-            JOIN flow_bootstrap_identity i USING(stage,launch_id,kind)
-            JOIN flow_shadow_jobs j USING(stage,launch_id,kind)
-            JOIN flow_shadow_meta m ON m.key=r.stage||':semantics:'||r.launch_id||':'||r.kind
-            WHERE m.value=? AND r.launch_id=? AND r.kind=? AND i.query_json=?
-              AND r.first_block<=? AND r.last_block>=?
-              AND r.last_block<=j.highest_contiguous_verified_block ORDER BY r.first_block,r.last_block""",
-            (self.semantics(launch), launch, kind, identity, last, first))]
+        return compatible_ranges(self.db, launch, kind, query, self.semantics(launch), first, last)
 
     def start_block(self, row, filt):
         base, cursor = filt['safe_start'], self.db.state(
@@ -251,7 +245,7 @@ class OfflineDrain(ShadowReconciler):
         saved = self.db.conn.execute('SELECT query_json FROM flow_bootstrap_identity WHERE stage=? AND launch_id=? AND kind=?',
                                     (job['stage'], job['launch_id'], job['kind'])).fetchone()
         query = super()._query(job, target)
-        if not saved or saved[0] != canonical(query):
+        if not saved or query_identity(json.loads(saved[0])) != query_identity(query):
             raise OfflineAbort('Maintenance filter identity changed')
         return query
 

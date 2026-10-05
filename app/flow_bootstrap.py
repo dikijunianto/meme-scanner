@@ -5,6 +5,7 @@ import time
 from app.flow_data import iso, stamp
 from app.flow_shadow import SHADOW_SPAN
 from app.rpc import RpcError
+from app.flow_identity import query_identity
 
 
 def required_filters(worker, target):
@@ -65,7 +66,7 @@ class CursorBootstrap:
                       WHERE stage=? AND launch_id=? AND kind=?''',key).fetchone()
                     if (not job or job['original_safe_start']>start or
                         job['reconciliation_upper_bound']!=end or not saved or
-                        saved['query_json']!=identity or saved['upper_at']!=cap_at):
+                        query_identity(json.loads(saved['query_json']))!=query_identity(query) or saved['upper_at']!=cap_at):
                         raise RpcError('Bootstrap proof identity changed')
                     if cursor is None:
                         self.db.conn.execute("UPDATE flow_bootstrap SET status='in_progress' WHERE launch_id=? AND kind=? AND status='required'",
@@ -106,7 +107,7 @@ class CursorBootstrap:
                     if kind==job['kind']),None)
         identity=self.db.conn.execute('''SELECT query_json,upper_at FROM flow_bootstrap_identity
           WHERE stage=? AND launch_id=? AND kind=?''',(stage,job['launch_id'],job['kind'])).fetchone()
-        if not identity or identity['query_json']!=json.dumps(query,sort_keys=True,separators=(',',':')):
+        if not identity or query_identity(json.loads(identity['query_json']))!=query_identity(query):
             raise RpcError('Bootstrap filter changed')
         return target,identity['upper_at']
 

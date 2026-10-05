@@ -255,13 +255,15 @@ class FlowDB:
                           'cursor':int(cursor) if cursor is not None else None})
         ready=(row['coverage_quality']=='complete' and
                all(p['bootstrap_status']=='complete' and p['cursor'] is not None for p in proof))
-        incidents=[]
-        for incident_row in self.conn.execute("SELECT value FROM flow_state WHERE key LIKE 'pit_collection_incident:%'"):
-            incident=json.loads(incident_row[0])
+        incidents=[];fresh_incidents=[]
+        for incident_row in self.conn.execute("SELECT key,value FROM flow_state WHERE key LIKE 'pit_collection_incident:%'"):
+            incident=json.loads(incident_row['value'])
+            boundary=incident.get('runtime_healthy_at') or incident['PIT_COLLECTION_RECOVERY_END']
             if (row['feature_cutoff_at']>=incident['PIT_COLLECTION_REGRESSION_START'] and
-                (incident['PIT_COLLECTION_RECOVERY_END'] is None or
-                 row['coverage_start_at'] is None or row['coverage_start_at']<incident['PIT_COLLECTION_RECOVERY_END'])):
+                (boundary is None or row['coverage_start_at'] is None or row['coverage_start_at']<boundary)):
                 incidents.append(incident['switch_id'])
+            elif boundary is not None and incident['PIT_COLLECTION_RECOVERY_END'] is None and row['feature_cutoff_at']>=boundary:
+                fresh_incidents.append((incident_row['key'],incident))
         if incidents:ready=False
         semantic=json.dumps((FEATURE_SCHEMA_VERSION,payload_hash,row['coverage_quality'],
                              row['coverage_reason'],ready,filter_hash),separators=(',',':'))
@@ -293,6 +295,13 @@ class FlowDB:
                            row['feature_cutoff_at'],at,proved,max(row['feature_cutoff_at'],at,proved) if ready else None,
                            row['coverage_quality'],row['coverage_reason'],payload,payload_hash,semantic_hash,
                            reason,start['deploy_revision'],json.dumps(evidence,sort_keys=True,separators=(',',':')),at))
+        if ready:
+            for key,incident in fresh_incidents:
+                incident['PIT_COLLECTION_RECOVERY_END']=at
+                incident['first_fresh_pit']={'launch_id':launch,'window_seconds':window,
+                    'feature_cutoff_at':row['feature_cutoff_at'],'materialized_at':at,
+                    'model_eligible_at':max(row['feature_cutoff_at'],at),'payload_sha256':payload_hash}
+                self.conn.execute('UPDATE flow_state SET value=? WHERE key=?',(json.dumps(incident),key))
 
     def needs_bootstrap(self,launch,kind):
         """A required filter without an established cursor needs explicit proof."""

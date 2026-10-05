@@ -56,6 +56,8 @@ class ShadowRpc(FlowRpc):
         return await super().call(method, params)
 
     async def _send(self, payload, method):
+        guard = getattr(self, 'recovery_guard', None)
+        if guard is not None:guard()
         members = payload if isinstance(payload, list) else [payload]
         n = len(members)
         logs = sum(x['method'] == 'eth_getLogs' for x in members)
@@ -276,9 +278,23 @@ class ShadowReconciler:
             last=job['reconciliation_upper_bound']
             graduation=json.loads(target['graduation_json']) if target['graduation_json'] else None
             while current<=last:
+                # Seeded compatible proof can contain islands. Never query across
+                # one: skip committed coverage and cap new work before its start.
+                proof = self.db.conn.execute('''SELECT first_block,last_block FROM flow_shadow_ranges
+                  WHERE stage=? AND launch_id=? AND kind=? AND last_block>=?
+                  ORDER BY first_block,last_block LIMIT 1''', (*key, current)).fetchone()
+                if proof and proof['first_block'] <= current:
+                    current = min(last, proof['last_block'])+1
+                    with self.db.conn:
+                        self.db.conn.execute('''UPDATE flow_shadow_jobs SET next_unverified_block=?,
+                          highest_contiguous_verified_block=?,completion_status=?
+                          WHERE stage=? AND launch_id=? AND kind=?''',
+                          (current,current-1,'complete' if current>last else 'pending',*key))
+                    continue
                 if max_chunks is not None and chunks>=max_chunks:return False
                 if getattr(self.worker,'connected',False):self.worker.drain()
                 end=min(last,current+span-1)
+                if proof:end=min(end,proof['first_block']-1)
                 self.worker.rpc.job=key
                 try:
                     rows=await self.worker.rpc.call('eth_getLogs',[dict(query,fromBlock=hex(current),toBlock=hex(end))])

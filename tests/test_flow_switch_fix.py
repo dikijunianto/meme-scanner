@@ -194,7 +194,8 @@ class SwitchFixTests(unittest.IsolatedAsyncioTestCase):
             await self.runner.worker.reconcile()
         self.assertEqual(self.db.state('recovery_state'),'healthy')
         incident=json.loads(self.db.state(f'pit_collection_incident:{self.sid}'))
-        self.assertIsNotNone(incident['PIT_COLLECTION_RECOVERY_END'])
+        self.assertIsNone(incident['PIT_COLLECTION_RECOVERY_END'])
+        self.assertIsNotNone(incident['runtime_healthy_at'])
         for i,start in ((3,incident['PIT_COLLECTION_REGRESSION_START']+1),(4,time.time()+1)):
             data=target(launch=i,start=start);data['token_address']='0x'+f'{i:040x}'
             t=insert_target(self.db,data)
@@ -204,6 +205,9 @@ class SwitchFixTests(unittest.IsolatedAsyncioTestCase):
         new=dict(self.db.conn.execute('SELECT * FROM flow_feature_versions WHERE launch_id=4 AND window_seconds=60').fetchone())
         self.assertIsNone(old['model_eligible_at']);self.assertIsNotNone(new['model_eligible_at'])
         self.assertEqual(new['model_eligible_at'],new['materialized_at'])
+        incident=json.loads(self.db.state(f'pit_collection_incident:{self.sid}'))
+        self.assertEqual(incident['PIT_COLLECTION_RECOVERY_END'],new['materialized_at'])
+        self.assertEqual(incident['first_fresh_pit']['launch_id'],4)
         before=[tuple(r) for r in self.db.conn.execute('SELECT * FROM flow_feature_versions')]
         self.db.rebuild(self.db.target(3),time.time()+100)
         self.assertEqual(before[:len(before)],[tuple(r) for r in self.db.conn.execute('SELECT * FROM flow_feature_versions')][:len(before)])
