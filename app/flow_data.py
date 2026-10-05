@@ -255,6 +255,14 @@ class FlowDB:
                           'cursor':int(cursor) if cursor is not None else None})
         ready=(row['coverage_quality']=='complete' and
                all(p['bootstrap_status']=='complete' and p['cursor'] is not None for p in proof))
+        incidents=[]
+        for incident_row in self.conn.execute("SELECT value FROM flow_state WHERE key LIKE 'pit_collection_incident:%'"):
+            incident=json.loads(incident_row[0])
+            if (row['feature_cutoff_at']>=incident['PIT_COLLECTION_REGRESSION_START'] and
+                (incident['PIT_COLLECTION_RECOVERY_END'] is None or
+                 row['coverage_start_at'] is None or row['coverage_start_at']<incident['PIT_COLLECTION_RECOVERY_END'])):
+                incidents.append(incident['switch_id'])
+        if incidents:ready=False
         semantic=json.dumps((FEATURE_SCHEMA_VERSION,payload_hash,row['coverage_quality'],
                              row['coverage_reason'],ready,filter_hash),separators=(',',':'))
         semantic_hash=hashlib.sha256(semantic.encode()).hexdigest()
@@ -279,6 +287,7 @@ class FlowDB:
                   'lifecycle_state_at_cutoff':'graduated' if len(intervals)>1 else 'curve',
                   'required_filter_set_hash':filter_hash,
                   'proof_source':'existing_bootstrap_and_recovery_cursors' if ready else 'incomplete_or_unknown'}
+        if incidents:evidence['incident_reconstruction_not_pit_safe']=incidents
         self.conn.execute('''INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                           (launch,window,1+(prior['version_number'] if prior else 0),FEATURE_SCHEMA_VERSION,
                            row['feature_cutoff_at'],at,proved,max(row['feature_cutoff_at'],at,proved) if ready else None,

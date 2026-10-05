@@ -27,6 +27,27 @@ def value(row):
     return json.loads(row['payload']) if row else None
 
 
+def waiting_for_budget(db,switch_id,budget,now=None):
+    now=time.time() if now is None else now
+    row=db.conn.execute('SELECT * FROM flow_provider_switches WHERE id=?',(switch_id,)).fetchone()
+    if not row or row['state'] in ('FAILED','HEALTHY'):raise ValueError('Pending switch required')
+    item=value(row)
+    prior=item.get('budget_wait',{}).get('pending_state',row['state'])
+    item['budget_wait']={'pending_state':prior,'scope':budget.scope,'used':budget.used,
+                         'limit':budget.limit,'retry_after':budget.reset_at or now+30,'waited_at':now}
+    return save(db,switch_id,'WAITING_FOR_BUDGET',item)
+
+
+def resume_budget_wait(db,row,now=None):
+    now=time.time() if now is None else now
+    item=value(row)
+    if row['state']!='WAITING_FOR_BUDGET':return item
+    wait=item['budget_wait']
+    if now<wait['retry_after']:return None
+    item['last_budget_wait']=item.pop('budget_wait')
+    return save(db,row['id'],wait['pending_state'],item)
+
+
 def connection_open(db,provider,now=None,session_id=None):
     now=time.time() if now is None else now
     with db.conn:

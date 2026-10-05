@@ -22,6 +22,7 @@ from app import flow_provider_switch as provider_switch
 from app.flow_providers import FlowProviders, provider
 from app.flow_data import FlowDB, BUY, SELL, SWAP, HOOK, decode_event, stamp, iso, WINDOWS
 from app.rpc import Rpc, RpcError, LogRangeError, retry_delay
+from app.flow_budget import FlowBudget, BudgetWait
 
 log=logging.getLogger(__name__)
 RECOVERY_CHUNK_BLOCKS=10
@@ -68,16 +69,6 @@ class FlowSettings:
         return result
 
 
-class FlowBudget(RpcError):
-    def __init__(self, scope, used=None, limit=None, reset_at=None, first_block=None):
-        self.scope,self.used,self.limit,self.reset_at,self.first_block=scope,used,limit,reset_at,first_block
-        self.category=('UNRECOVERABLE_GAP' if scope=='recovery_range' else
-                       'TEMPORARY_BUDGET_WAIT' if scope=='minute_rpc' else
-                       'DAILY_BUDGET_EXHAUSTED' if scope in ('daily_rpc','daily_getlogs') else
-                       'RESOURCE_LIMIT')
-        super().__init__(scope)
-
-
 class FlowRpc(Rpc):
     def __init__(self,config,settings,db,providers):
         super().__init__(replace(config,rpc_http=providers.http if settings.split_enabled else config.rpc_http,
@@ -100,7 +91,7 @@ class FlowRpc(Rpc):
                 ('daily_rpc',self.db.used('flow_rpc_members',day),n,self.settings.daily_calls,day+86400),
                 ('daily_getlogs',self.db.used('flow_eth_getLogs',day),getlogs,self.settings.daily_getlogs,day+86400),
                 ('minute_rpc',self.db.used('flow_rpc_members',minute),n,self.settings.minute_calls,minute+60)):
-                if used+needed>limit:raise FlowBudget(scope,used,limit,reset)
+                if used+needed>limit:raise BudgetWait(scope,used,limit,reset)
             metrics=[('flow_http_calls_'+routed,1),('flow_rpc_members_'+routed,n),
                      ('flow_rpc_members',n),('flow_http_calls',1)]
             if getlogs:metrics += [('flow_eth_getLogs_'+routed,getlogs)]
@@ -634,13 +625,21 @@ class FlowWorker:
                 self.pending_recovery.discard(launch);self.recovery_heads.pop(launch,None)
                 self.blocked_recovery.pop(launch,None);self.dirty.add(launch)
         if not self.pending_recovery and self.db.state('service_status') in (
-                'temporary_budget_wait','daily_budget_exhausted','unrecoverable_gap','bootstrap_required','provider_error'):
+                'temporary_budget_wait','daily_budget_exhausted','unrecoverable_gap','bootstrap_required','provider_error',
+                'provider_switch_failed','provider_switch_pending'):
             self.db.set_state('service_status','connected')
         status=self.db.state('service_status')
         self.db.set_state('recovery_state','healthy' if status=='connected' else status)
         active,historical=gap_counts(self.db)
         self.db.set_state('active_unresolved_gap_count',active)
         self.db.set_state('historical_unresolved_gap_count',historical)
+        if status=='connected' and not active and self.db.state('connection_state')=='connected':
+            with self.db.conn:
+                for row in self.db.conn.execute("SELECT key,value FROM flow_state WHERE key LIKE 'pit_collection_incident:%'").fetchall():
+                    incident=json.loads(row['value'])
+                    if incident['PIT_COLLECTION_RECOVERY_END'] is None:
+                        incident['PIT_COLLECTION_RECOVERY_END']=time.time()
+                        self.db.conn.execute('UPDATE flow_state SET value=? WHERE key=?',(json.dumps(incident),row['key']))
 
     def drain(self):
         while not self.queue.empty():
@@ -697,7 +696,11 @@ class FlowWorker:
             for kind in self.filters(t):
                 base=graduation['block_number'] if graduation and kind!='curve' else t['launch_block']
                 snapshot.append({'launch_id':t['launch_id'],'kind':kind,'base':base,
-                                 'cursor':self.db.state(f'recovery:{t["launch_id"]}:{kind}')})
+                                 'cursor':self.db.state(f'recovery:{t["launch_id"]}:{kind}'),
+                                 'query':self.filters(t)[kind],
+                                 'token':t['token_address'].lower(),'quote':t['quote_asset_address'].lower(),
+                                 'launch_log_index':t['launch_log_index'],
+                                 'lifecycle':'graduated' if graduation else 'curve_ungraduated'})
         return snapshot
 
     def subscriptions_acknowledged(self):
@@ -711,7 +714,8 @@ class FlowWorker:
         identity=cutover['id'] if cutover else None
         row=provider_switch.pending(self.db,identity)
         if not row or time.time()<self.switch_retry_at:return
-        item=provider_switch.value(row)
+        item=provider_switch.resume_budget_wait(self.db,row)
+        if item is None:return
         if not item['filters']:
             if not item['new_connected_at'] or item['new_provider']!=self.ws_provider:
                 raise RpcError('Provider switch connection identity changed')
@@ -738,6 +742,7 @@ class FlowWorker:
             runner.add_jobs(stage,item['uncertain_from'],item['frozen_head'],
                             {f['launch_id'] for f in item['filters']})
             if not await runner.run_stage(stage):
+                if isinstance(runner.pause_budget,BudgetWait):raise runner.pause_budget
                 self.switch_retry_at=time.time()+30
                 return
             summary=runner.summary(stage)
@@ -776,6 +781,23 @@ class FlowWorker:
         finally:
             shadow_rpc=self.rpc;self.rpc=original_rpc
             await shadow_rpc.close()
+
+    async def advance_provider_switch(self):
+        """Narrow, import-safe proof tick; a limiter rejection is never a disconnect."""
+        session=cutover_session(self.db)
+        identity=session['id'] if session else None
+        try:await self.prove_provider_switch()
+        except BudgetWait as exc:
+            self.defer_recovery(exc)
+            row=provider_switch.pending(self.db,identity)
+            if row:provider_switch.waiting_for_budget(self.db,row['id'],exc)
+        except FlowBudget as exc:self.defer_recovery(exc)
+        except (RpcError,ValueError) as exc:
+            row=provider_switch.pending(self.db,identity)
+            if row:provider_switch.failed(self.db,row['id'],type(exc).__name__,
+                connection_id=self.connection_id,provider=self.ws_provider)
+            self.db.set_state('service_status','provider_switch_failed')
+            self.db.set_state('recovery_state','provider_switch_failed')
 
     async def run(self):
         cutover=cutover_session(self.db)
@@ -838,14 +860,7 @@ class FlowWorker:
                             if self.settings.split_enabled and self.subscriptions_acknowledged():
                                 if self.subscription_ready_at is None:
                                     self.subscription_ready_at=time.time()
-                                try:await self.prove_provider_switch()
-                                except FlowBudget as exc:self.defer_recovery(exc)
-                                except (RpcError,ValueError) as exc:
-                                    switching=provider_switch.pending(self.db,current['id'] if current else None)
-                                    if switching:provider_switch.failed(self.db,switching['id'],type(exc).__name__,
-                                        connection_id=self.connection_id,provider=self.ws_provider)
-                                    self.db.set_state('service_status','provider_switch_failed')
-                                    self.db.set_state('recovery_state','provider_switch_failed')
+                                await self.advance_provider_switch()
                             self.drain()
                             if self.reader.done():await self.reader;raise RpcError('WS closed during recovery')
                             if not self.settings.split_enabled and cutover and cutover['state'] in \

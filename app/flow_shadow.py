@@ -10,7 +10,8 @@ from app.config import ROOT
 from app.flow_cutover import current as active_cutover, save as save_cutover, session as cutover_session
 from app.flow_data import BUY, SELL
 from app.flow_providers import provider
-from app.flow_worker import FlowBudget, FlowRpc, FlowWorker
+from app.flow_worker import FlowRpc, FlowWorker
+from app.flow_budget import FlowBudget, BudgetWait
 from app.rpc import LogRangeError, Rpc, RpcError
 
 SHADOW_SPAN = 2000
@@ -63,11 +64,11 @@ class ShadowRpc(FlowRpc):
         self.db.conn.execute('BEGIN IMMEDIATE')
         try:
             if self.db.used('flow_rpc_members', day) + n > self.settings.daily_calls:
-                raise FlowBudget('Shadow daily HTTP budget exhausted')
+                raise BudgetWait('daily_rpc',self.db.used('flow_rpc_members',day),self.settings.daily_calls,day+86400)
             if self.db.used('flow_rpc_members', minute) + n > self.settings.minute_calls:
-                raise FlowBudget('Shadow minute HTTP budget exhausted')
+                raise BudgetWait('minute_rpc',self.db.used('flow_rpc_members',minute),self.settings.minute_calls,minute+60)
             if logs and self.db.used('flow_eth_getLogs', day) + logs > self.settings.daily_getlogs - self.reserve:
-                raise FlowBudget('Shadow getLogs reserve reached')
+                raise BudgetWait('daily_getlogs',self.db.used('flow_eth_getLogs',day),self.settings.daily_getlogs-self.reserve,day+86400)
             self.attempt += 1
             metrics = [('flow_rpc_members', n), ('flow_http_calls', 1),
                        ('flow_http_calls_validation', 1), ('flow_rpc_members_validation', n),
@@ -259,6 +260,7 @@ class ShadowReconciler:
 
     async def run_stage(self, stage,max_chunks=None):
         self.pause_scope = None
+        self.pause_budget = None
         chunks=0
         if self.session_id and (not (current:=active_cutover(self.db)) or current['id']!=self.session_id):
             raise RpcError('Cutover session changed before proof')
@@ -292,7 +294,8 @@ class ShadowReconciler:
                     continue
                 except FlowBudget as exc:
                     self.pause_scope = exc.scope
-                    if stage.startswith(('live_graduation:','live_bootstrap:')):
+                    self.pause_budget = exc
+                    if stage.startswith(('live_graduation:','live_bootstrap:','provider_switch:')):
                         return False
                     if 'minute' in str(exc):
                         if getattr(self.worker,'connected',False):self.worker.drain()
@@ -319,6 +322,9 @@ class ShadowReconciler:
                             item['blockTimestamp']=hex(await self.worker.header(block))
                         if self.worker.ingest(target,item,shadow=scoped) is False:
                             raise RpcError('Shadow event rejected')
+                except BudgetWait as exc:
+                    self.pause_scope=exc.scope;self.pause_budget=exc
+                    return False
                 except (RpcError,FlowBudget) as exc:
                     self.fail_range(key,current,end,exc)
                     return False

@@ -1,5 +1,6 @@
 """Resume only frozen failed-switch proof; no service restart or status override."""
-import _bootstrap  # noqa: F401
+if __package__:from scripts import _bootstrap  # noqa: F401
+else:import _bootstrap  # noqa: F401
 import argparse
 import asyncio
 import json
@@ -11,10 +12,10 @@ from app.flow_providers import FlowProviders,provider
 from app.flow_provider_switch import latest,pending,resume_proved_failure,reconcile_zero_filter_failure,value
 from app.flow_shadow import make_reconciler,verified_checkout
 from app.flow_worker import FlowSettings
-from scripts.phase2b2_shadow import service
 
 
-async def recover(identity,handoff=False):
+async def recover(identity,handoff=False,conservative_later_head=False):
+    from scripts.phase2b2_shadow import service
     revision=verified_checkout()
     services={u:service(u) for u in ('meme-scanner','meme-scanner-flow')}
     if any(s['ActiveState']!='active' for s in services.values()):raise ValueError('Services must be active')
@@ -57,6 +58,10 @@ async def recover(identity,handoff=False):
                 target['launch_block']!=f['base'] or target['curve_address'].lower()!=launch['curve_address'].lower()):
                 raise ValueError('Immutable curve identity mismatch')
         before=runner.summary(stage)
+        if conservative_later_head:
+            from app.flow_switch_recovery import recover as conservative_recover
+            return await conservative_recover(runner,identity,revision,handoff,
+                unchanged=lambda: services=={u:service(u) for u in services})
         day=int(time.time())//86400*86400
         budget_before={k:db.used(k,day) for k in ('flow_eth_getLogs','flow_rpc_members')}
         complete=await runner.run_stage(stage)
@@ -73,8 +78,9 @@ async def recover(identity,handoff=False):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--switch-id',type=int,required=True)
-    p.add_argument('--handoff',action='store_true');a=p.parse_args()
-    try:print(json.dumps(asyncio.run(recover(a.switch_id,a.handoff)),indent=2))
+    p.add_argument('--handoff',action='store_true')
+    p.add_argument('--conservative-later-head',action='store_true');a=p.parse_args()
+    try:print(json.dumps(asyncio.run(recover(a.switch_id,a.handoff,a.conservative_later_head)),indent=2))
     except Exception as exc:
         print(json.dumps({'gate':'PROVIDER_SWITCH_RECOVERY_BLOCKED','error_type':type(exc).__name__}))
         raise SystemExit(1) from None

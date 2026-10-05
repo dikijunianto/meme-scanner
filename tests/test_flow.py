@@ -421,7 +421,7 @@ class WorkerTests(unittest.IsolatedAsyncioTestCase):
         self.settings.daily_calls=1
         with patch.object(Rpc,'_send',AsyncMock(side_effect=RpcError('offline'))) as send:
             for _ in range(2):
-                with self.assertRaises(RpcError):await self.worker.rpc._send({'method':'eth_call'},'eth_call')
+                with self.assertRaises((RpcError,FlowBudget)):await self.worker.rpc._send({'method':'eth_call'},'eth_call')
             self.assertEqual(send.await_count,1)
         self.assertEqual(self.db.used('flow_rpc_members',0),1)
         with self.assertRaises(sqlite3.OperationalError):self.worker.main.execute('DELETE FROM launches')
