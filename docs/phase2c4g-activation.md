@@ -161,3 +161,19 @@ Rollback requires explicit authorization and preserves all partitions/catalog/
 proofs; do not recreate/reset epoch2. A process crash before atomic seal leaves
 ACTIVATING; a crash after commit retains ACTIVE and the original seal. Startup
 re-proves uncertain connection gaps before subsequent live claims.
+
+## Continuing an already-stopped maintenance session
+
+Phase2C.4h stopped flow once and did not start it. Its preparation failed at the
+first service-helper import, before writer lock, migration, quarantine or RPC.
+After the separate command-loading repair is deployed and its exact module CLI
+passes isolated integration tests, continue from step4 using the retained old
+PID3673701. Refresh read-only source/service/budget/discovery/preservation gates;
+do not repeat step3, reset action evidence or invent a new epoch. A fresh boundary
+is captured only by the first successful preparation; the stop count stays1 and
+the start count stays0 until the separately authorized single start.
+
+The helper uses canonical `scripts._bootstrap` for package imports and retains
+top-level `_bootstrap` for direct script execution. CLI tests use fresh interpreters
+without a `scripts/` path injection, exercise real parsing/dispatch/preparation,
+and fake only external configuration, service reads and provider transport.

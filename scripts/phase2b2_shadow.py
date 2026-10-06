@@ -1,5 +1,6 @@
 """Operator-controlled, fail-closed Phase 2B.2 shadow and tail reconciliation."""
-import _bootstrap  # noqa: F401
+if __package__:from scripts import _bootstrap  # noqa: F401
+else:import _bootstrap  # noqa: F401
 import argparse
 import asyncio
 import hashlib
