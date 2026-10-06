@@ -6,6 +6,7 @@ import sqlite3
 import time
 
 from app.flow_data import WINDOWS, iso, stamp, quantile
+from app.flow_gap_recovery import obligations
 
 
 def readonly(path):
@@ -90,6 +91,7 @@ def usage(db,settings,hours=24,now=None,providers=None):
             'metrics':counters,'budget_utilization_utc_day':budgets,'db_growth':growth,'oldest_active_tracking_start':oldest,
             'phase2b_coverage_start_at':db.state('phase2b_coverage_start_at'),'service_status':db.state('service_status'),
             'connection_state':db.state('connection_state'),'recovery_state':db.state('recovery_state'),
+            'current_epoch_recovery_obligations':obligations(db) if db.epoch() else [],
             'cutover_state':cutover['state'].lower() if cutover else None,
             'session_phase':cutover['state'] if cutover else None,
             'operational_outcome':dict(outcome) if outcome else None,

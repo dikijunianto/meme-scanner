@@ -289,6 +289,16 @@ class FlowDB:
             seal=json.loads(epoch['boundary_json']).get('live_seal')
             ready=(ready and epoch['status']=='ACTIVE' and bool(epoch['pit_eligible']) and bool(seal) and not pending(self) and not blocked(self)
                    and not self.conn.execute('SELECT 1 FROM flow_gaps WHERE resolved=0 LIMIT 1').fetchone())
+            # Descriptive repair after a missed recovery cutoff is not fresh PIT.
+            for gap in self.conn.execute("SELECT id,start_at FROM flow_gaps WHERE launch_id=? AND reason IN ('ws_gap','reconnect_recovery_incomplete')",
+                                         (launch,)):
+                recovery=json.loads(self.state(f'gap_recovery:{gap["id"]}','{}'))
+                if gap['start_at']<=row['feature_cutoff_at']<recovery.get('completed_at',gap['start_at']):
+                    ready=False
+            missed=self.conn.execute('SELECT coverage_reason,model_eligible_at FROM flow_feature_versions '
+                'WHERE launch_id=? AND window_seconds=? ORDER BY version_number LIMIT 1',(launch,window)).fetchone()
+            if missed and missed['model_eligible_at'] is None and missed['coverage_reason'] in ('ws_gap','reconnect_recovery_incomplete'):
+                ready=False
         incidents=[];fresh_incidents=[]
         for incident_row in self.conn.execute("SELECT key,value FROM flow_state WHERE key LIKE 'pit_collection_incident:%'"):
             incident=json.loads(incident_row['value'])
@@ -384,13 +394,41 @@ class FlowDB:
 
     def state(self,key,default=None):
         r=self.conn.execute('SELECT value FROM flow_state WHERE key=?',(key,)).fetchone()
-        return r[0] if r else default
+        value=r[0] if r else default
+        return self.current_health() if key=='recovery_state' and value=='healthy' else value
+
+    def current_health(self):
+        """Quarantine is a partition boundary, never a target-expiry exemption."""
+        epoch=self.epoch()
+        if not epoch:return 'healthy'  # Preserve legacy reporting semantics.
+        from app.flow_epochs import sealed_proof_intact
+        if (epoch['status']!='ACTIVE' or not epoch['pit_eligible'] or
+            not sealed_proof_intact(self,json.loads(epoch['boundary_json']).get('live_seal'))):return 'bootstrap_required'
+        if self.state('connection_state')!='connected':return 'disconnected'
+        from app.flow_provider_switch import pending,blocked
+        if blocked(self):return 'provider_switch_failed'
+        if pending(self):return 'provider_switch_pending'
+        if self.conn.execute('SELECT 1 FROM flow_gaps WHERE resolved=0 LIMIT 1').fetchone():
+            from app.flow_gap_recovery import obligations
+            debts=obligations(self)
+            if any(d['state']=='operator_blocked' for d in debts):return 'unrecoverable_gap'
+            if any(d['state']=='budget_wait' for d in debts):return 'temporary_budget_wait'
+            return 'recovering'
+        if self.conn.execute("SELECT 1 FROM flow_bootstrap WHERE status!='complete' LIMIT 1").fetchone():
+            return 'bootstrap_required'
+        for target in self.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')"):
+            for interval in required_filter_intervals(target,target['tracking_end_at']):
+                state=self.conn.execute('SELECT status FROM flow_bootstrap WHERE launch_id=? AND kind=?',
+                    (target['launch_id'],interval['kind'])).fetchone()
+                if not state or state['status']!='complete' or self.needs_bootstrap(target['launch_id'],interval['kind']):
+                    return 'bootstrap_required'
+        if self.conn.execute("SELECT 1 FROM flow_shadow_jobs WHERE completion_status!='complete' LIMIT 1").fetchone():
+            return 'recovering'
+        return 'healthy'
 
     def set_state(self,key,value):
         if key=='recovery_state' and value=='healthy':
-            epoch=self.epoch()
-            if epoch and (epoch['status']!='ACTIVE' or not epoch['pit_eligible']):
-                value='bootstrap_required'
+            value=self.current_health()
         with self.conn:self.conn.execute('INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,str(value)))
 
     def count(self,metric,n=1,now=None):
@@ -402,7 +440,10 @@ class FlowDB:
 
     def gap(self,launch_id,start,end,reason,first_block=None):
         with self.conn:
-            self.conn.execute('INSERT INTO flow_gaps(launch_id,start_at,end_at,reason,first_block) VALUES(?,?,?,?,?)',(launch_id,start,max(start,end),reason,first_block))
+            gap=self.conn.execute('INSERT INTO flow_gaps(launch_id,start_at,end_at,reason,first_block) VALUES(?,?,?,?,?)',(launch_id,start,max(start,end),reason,first_block))
+            if self.epoch():
+                self.conn.execute('INSERT INTO flow_state VALUES(?,?)',
+                    (f'gap_recovery:{gap.lastrowid}',json.dumps({'state':'queued','attempts':0,'created_at':time.time()})))
             # Persist invalidation atomically; a crash must not leave stale complete rows.
             self.conn.execute("UPDATE flow_features SET coverage_quality='partial',coverage_reason=? WHERE launch_id=? AND feature_cutoff_at>=?",(reason,launch_id,start))
             target=self.target(launch_id)

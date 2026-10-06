@@ -150,6 +150,30 @@ after subscription ACKs and fresh bootstrap/tail proof. No old state is copied.
     finally:fresh.conn.close()
 
 
+def sealed_proof_intact(db,seal):
+    """Read-only verification of the retained activation proof, without RPC clients."""
+    from types import SimpleNamespace
+    from app.flow_bootstrap import CursorBootstrap
+    from app.flow_shadow import ShadowReconciler
+    from app.flow_worker import filter_queries
+    from app.rpc import RpcError
+    if not seal or not seal.get('zero_active_gaps') or 'filters' not in seal:return False
+    runner=object.__new__(ShadowReconciler)
+    runner.worker=SimpleNamespace(db=db,filters=filter_queries);runner.db=db;runner.session_id=None
+    try:
+        for filt in seal['filters']:
+            tail=filt['acknowledged_tail']
+            if tail and json.loads(db.state(f'epoch_tail_proof:{filt["launch_id"]}:{filt["kind"]}','null'))!=tail:
+                return False
+            for stage in [filt['bootstrap_stage'],*(tail['stages'] if tail else [])]:
+                job=db.conn.execute('SELECT * FROM flow_shadow_jobs WHERE stage=? AND launch_id=? AND kind=?',
+                                    (stage,filt['launch_id'],filt['kind'])).fetchone()
+                if not job:return False
+                CursorBootstrap(runner)._verify_job(stage,job)
+    except (KeyError,TypeError,ValueError,RpcError):return False
+    return True
+
+
 def seal_live(worker):
     """Never treat an existing cursor or current COMPLETE flag as activation proof."""
     from app.flow_bootstrap import CursorBootstrap

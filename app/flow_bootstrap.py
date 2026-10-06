@@ -139,10 +139,11 @@ class CursorBootstrap:
                 if state:
                     self.db.conn.execute('''UPDATE flow_gaps SET resolved=1 WHERE launch_id=? AND reason=?
                       AND first_block=?''',(launch,f'bootstrap_required:{kind}',state['safe_start']))
-                self.db.conn.execute('''UPDATE flow_gaps SET resolved=1 WHERE launch_id=? AND resolved=0
-                  AND reason IN ('ws_gap','reconnect_recovery_incomplete')
-                  AND first_block BETWEEN ? AND ? AND end_at<=?''',
-                                     (launch,job['original_safe_start'],head,upper_at))
+                if (self.db.epoch() or {}).get('status')!='ACTIVE':
+                    self.db.conn.execute('''UPDATE flow_gaps SET resolved=1 WHERE launch_id=? AND resolved=0
+                      AND reason IN ('ws_gap','reconnect_recovery_incomplete')
+                      AND first_block BETWEEN ? AND ? AND end_at<=?''',
+                                         (launch,job['original_safe_start'],head,upper_at))
                 coverage_end=min(target['tracking_end_at'],upper_at)
                 self.db.conn.execute('''UPDATE flow_tracking_targets SET
                   coverage_start_at=CASE WHEN ?=launch_block THEN coalesce(coverage_start_at,tracking_start_at)

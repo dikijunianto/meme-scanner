@@ -457,8 +457,13 @@ class FlowWorker:
 
     def recovery_gap(self,t,first=None):
         exists=self.db.conn.execute("SELECT 1 FROM flow_gaps WHERE launch_id=? AND reason='reconnect_recovery_incomplete' AND resolved=0 LIMIT 1",(t['launch_id'],)).fetchone()
+        if first is None:
+            cursors=[int(self.db.state(f'recovery:{t["launch_id"]}:{kind}'))-2
+                     for kind in self.filters(t) if self.db.state(f'recovery:{t["launch_id"]}:{kind}') is not None]
+            first=max(t['launch_block'],min(cursors)) if cursors else t['launch_block']
         if not exists:self.db.gap(t['launch_id'],t['last_event_at'] or t['tracking_start_at'],time.time(),
-                                  'reconnect_recovery_incomplete',first if first is not None else t['launch_block'])
+                                  'reconnect_recovery_incomplete',first)
+        self.pending_recovery.add(t['launch_id'])
 
     def defer_recovery(self,exc):
         if exc.reset_at:self.recovery_wait_until=max(self.recovery_wait_until,exc.reset_at)
@@ -570,6 +575,15 @@ class FlowWorker:
             self.epoch_discovery_ready=True
         except FlowBudget:self.db.count('flow_budget_pauses')
         targets=[dict(r) for r in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')")]
+        current_debts=[]
+        if self.db.epoch():
+            from app.flow_gap_recovery import obligations,save
+            current_debts=obligations(self.db)
+            for debt in current_debts:
+                if debt['state']=='operator_blocked':
+                    save(self.db,debt,state='operator_blocked',reason=debt['reason_detail'])
+                else:self.pending_recovery.add(debt['launch_id'])
+            self.db.set_state('active_epoch_required_unresolved_gap_count',len(current_debts))
         if self.settings.split_enabled and (value:=cutover_session(self.db)) and value['state']=='FAILED':
             self.cutover_tick(targets)
             return
@@ -614,11 +628,13 @@ class FlowWorker:
                 self.db.set_state('recovery_state',self.db.state('service_status'))
                 return
         if recovery:
-            recovery=[t for t in recovery if not self.accept_shadow_handoff(t)]
+            recovery=[t for t in recovery if any(d['launch_id']==t['launch_id'] for d in current_debts)
+                      or not self.accept_shadow_handoff(t)]
         if recovery and time.time()<self.recovery_wait_until:return
         if recovery:
             activating=(self.db.epoch() or {}).get('status')=='ACTIVATING'
-            normal=[] if activating else [t for t in recovery if not self.bootstrap_kinds(t)]
+            normal=[] if activating else [t for t in recovery if not self.bootstrap_kinds(t)
+                and not any(d['launch_id']==t['launch_id'] for d in current_debts)]
             try:
                 if any(t['launch_id'] not in self.recovery_heads for t in normal):
                     # Pin a head once; retries cannot chase a moving chain.
@@ -664,6 +680,14 @@ class FlowWorker:
                 if activating:
                     if await self.activation_tail(t):
                         self.pending_recovery.discard(launch)
+                    continue
+                debts=[d for d in current_debts if d['launch_id']==launch]
+                if debts:
+                    from app.flow_gap_recovery import recover
+                    for debt in debts:
+                        if debt['state']!='operator_blocked':await recover(self,t,debt)
+                    if not self.db.conn.execute('SELECT 1 FROM flow_gaps WHERE launch_id=? AND resolved=0 LIMIT 1',(launch,)).fetchone():
+                        self.pending_recovery.discard(launch);self.recovery_heads.pop(launch,None)
                     continue
                 fingerprint=self.recovery_fingerprint(t)
                 if self.blocked_recovery.get(launch)==fingerprint:continue
