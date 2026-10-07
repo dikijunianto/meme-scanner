@@ -26,18 +26,17 @@ class SessionLifecycleTests(unittest.TestCase):
         self.db.set_state('current_wss_provider','alchemy')
         with self.db.conn:
             self.db.conn.executescript('''
-              CREATE TABLE flow_shadow_meta(key TEXT PRIMARY KEY,value TEXT);
-              CREATE TABLE flow_shadow_jobs(stage TEXT,launch_id INTEGER,kind TEXT,
-                  completion_status TEXT,PRIMARY KEY(stage,launch_id,kind));
-              CREATE TABLE flow_shadow_ranges(stage TEXT,launch_id INTEGER,kind TEXT,
-                  first_block INTEGER,last_block INTEGER,was_terminal INTEGER);
               INSERT INTO flow_shadow_meta VALUES('git_revision','old-revision');
               INSERT INTO flow_shadow_meta VALUES('old_flow_pid','1745059');
               INSERT INTO flow_shadow_meta VALUES('H_prefetch','10');
               INSERT INTO flow_shadow_meta VALUES('H_pre_stop','12');
               INSERT INTO flow_shadow_meta VALUES('H_stop','14');
-              INSERT INTO flow_shadow_jobs VALUES('historical',1,'curve','complete');
-              INSERT INTO flow_shadow_jobs VALUES('stop_tail',1,'curve','complete');
+              INSERT INTO flow_shadow_jobs(stage,launch_id,kind,original_safe_start,reconciliation_upper_bound,
+                next_unverified_block,highest_contiguous_verified_block,completion_status)
+                VALUES('historical',1,'curve',1,10,11,10,'complete');
+              INSERT INTO flow_shadow_jobs(stage,launch_id,kind,original_safe_start,reconciliation_upper_bound,
+                next_unverified_block,highest_contiguous_verified_block,completion_status)
+                VALUES('stop_tail',1,'curve',11,14,15,14,'complete');
               INSERT INTO flow_shadow_ranges VALUES('historical',1,'curve',1,10,1);
               INSERT INTO flow_shadow_ranges VALUES('stop_tail',1,'curve',11,14,1);
             ''')
@@ -51,6 +50,13 @@ class SessionLifecycleTests(unittest.TestCase):
     def fresh(self):
         return create(self.db,revision='new-revision',source_pid='1963150',
                       source_start='100',main_pid='64326',roles_fingerprint='roles')
+
+    def complete_job(self,stage):
+        first,last=(11,14) if stage.endswith('stop_tail') else (1,10)
+        with self.db.conn:self.db.conn.execute('''INSERT INTO flow_shadow_jobs(
+          stage,launch_id,kind,original_safe_start,reconciliation_upper_bound,
+          next_unverified_block,highest_contiguous_verified_block,completion_status)
+          VALUES(?,1,'curve',?,?,?,?,'complete')''',(stage,first,last,last+1,last))
 
     def test_old_terminal_revision_is_visible_and_immutable(self):
         before=legacy_digest(self.db)
@@ -136,8 +142,7 @@ class SessionLifecycleTests(unittest.TestCase):
         fresh=advance(self.db,fresh,'SHADOW_VERIFIED',H_prefetch=10,shadow_proof='verified')
         with self.assertRaises(ValueError):new(self.db,10,14,[])
         for stage in ('historical','stop_tail'):
-            with self.db.conn:self.db.conn.execute('INSERT INTO flow_shadow_jobs VALUES(?,?,?,?)',
-                (f'cutover:{fresh["id"]}:{stage}',1,'curve','complete'))
+            self.complete_job(f'cutover:{fresh["id"]}:{stage}')
         advance(self.db,fresh,'SOURCE_STOPPED',source_stopped_at='2026-09-27T00:00:00Z')
         self.assertEqual(new(self.db,10,14,[])['state'],'STOP_TAIL_VERIFIED')
         self.assertEqual(legacy_digest(self.db)[1],2)
@@ -177,9 +182,8 @@ class SessionLifecycleTests(unittest.TestCase):
     def test_shadowed_and_authorized_abort_keep_proof_and_allow_fresh_attempt(self):
         self.archive();fresh=self.fresh()
         stage=f'cutover:{fresh["id"]}:historical'
+        self.complete_job(stage)
         with self.db.conn:
-            self.db.conn.execute('INSERT INTO flow_shadow_jobs VALUES(?,?,?,?)',
-                                 (stage,1,'curve','complete'))
             self.db.conn.execute('INSERT INTO flow_shadow_ranges VALUES(?,?,?,?,?,?)',
                                  (stage,1,'curve',1,10,1))
         shadow=advance(self.db,fresh,'SHADOW_VERIFIED',H_prefetch=10,targets=[{'launch_id':1}],
@@ -218,8 +222,7 @@ class SessionLifecycleTests(unittest.TestCase):
         with self.assertRaises(ValueError):abort_pre_stop(self.db,stopped,'too_late',
             source_pid='1963150',source_start='100',route='alchemy',split=False)
         for stage in ('historical','stop_tail'):
-            with self.db.conn:self.db.conn.execute('INSERT INTO flow_shadow_jobs VALUES(?,?,?,?)',
-                (f'cutover:{fresh["id"]}:{stage}',1,'curve','complete'))
+            self.complete_job(f'cutover:{fresh["id"]}:{stage}')
         tail=new(self.db,10,14,[])
         with self.assertRaises(ValueError):mark_split_configured(self.db,tail,'different')
         configured=mark_split_configured(self.db,tail,'candidate')

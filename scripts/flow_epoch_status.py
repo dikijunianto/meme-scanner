@@ -19,9 +19,12 @@ def status():
         cutover=session(db)
         from app.flow_segments import record,historical_debt as preclean_debt
         segment=record(db)
+        from app.flow_partition_schema import missing,VERSION
+        absent=missing(db.conn) if segment else []
         with open_readonly(Config.load().database,settings.database) as joined:
             maturity=ledger_audit(joined,time.time())
-        return {'current_epoch':db.epoch(),'health':db.state('recovery_state'),
+        return {'current_epoch':db.epoch(),'health':db.current_health(),
+                'partition_schema':{'contract_version':VERSION,'missing':absent,'complete':not absent},
                 'research_segment':segment,'preclean_incident_debt':preclean_debt(db),
                 'research_clean_start':segment['start_at'] if segment and segment['status']=='VALIDATED' else None,
                 'active_and_historical_current_epoch_gaps':gap_counts(db),

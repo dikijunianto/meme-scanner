@@ -304,6 +304,18 @@ def ledger_audit(db,as_of):
                     'model_readiness':chronological_readiness([],True)}
         if db.execute("SELECT 1 FROM collection.sqlite_master WHERE name='flow_research_segments'").fetchone():
             segment=db.execute("SELECT * FROM collection.flow_research_segments WHERE epoch_id=? AND status IN ('SEALED','ACTIVE','VALIDATED')",(epoch['epoch_id'],)).fetchone()
+    if segment:
+        from app.flow_partition_schema import missing,VERSION
+        if absent:=missing(db,'flow'):
+            readiness=chronological_readiness([],True)
+            clean_start=segment['start_at'] if segment['status']=='VALIDATED' else None
+            readiness['unmet_conditions'].append('SEGMENT_SCHEMA_INCOMPLETE')
+            if clean_start is None:readiness['unmet_conditions'].append('research_clean_start_unknown')
+            readiness['status']='MODEL_DATA_NOT_MATURE'
+            return {'collection_epoch':dict(epoch),'research_segment':dict(segment),
+                    'research_clean_start':clean_start,'primary_eligible':False,'first_eligible_versions':0,
+                    'partition_schema':{'contract_version':VERSION,'missing':absent,'complete':False},
+                    'model_readiness':readiness}
     if not db.execute("SELECT 1 FROM flow.sqlite_master WHERE name='flow_feature_ledger_start'").fetchone():
         return {'boundary':None,'launches':0,'complete_windows':0,'first_eligible_versions':0,
                 'usable_by_pair':{},'days_of_history':0,'model_readiness':chronological_readiness([],True)}

@@ -69,7 +69,10 @@ async def prepare(runner, *, segment_id, revision, reason):
     with path.open('xb'):pass  # Never overwrite an interrupted partition.
     fresh=FlowDB(path,follow_epoch=False)
     try:
-        fresh.migrate();fresh.activate_pit_ledger(revision,head,at)
+        fresh.migrate(shared_budget=True)
+        from app.flow_partition_schema import missing
+        if missing(fresh.conn):raise ValueError('SEGMENT_SCHEMA_INCOMPLETE before publication')
+        fresh.activate_pit_ledger(revision,head,at)
         fresh.set_state('epoch_catalog_path',Path(db.catalog_conn.execute('PRAGMA database_list').fetchone()[2]).resolve())
         fresh.set_state('phase2b_coverage_start_at',at);fresh.set_state('recovery_state','bootstrap_required')
         with db.catalog_conn:

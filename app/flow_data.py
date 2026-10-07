@@ -179,7 +179,7 @@ class FlowDB:
         self.conn.close()
         if self.catalog_conn is not self.conn:self.catalog_conn.close()
 
-    def migrate(self):
+    def migrate(self, *, shared_budget=False):
         self.conn.execute('PRAGMA journal_mode=WAL')
         self.conn.executescript('''
         CREATE TABLE IF NOT EXISTS flow_state(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -216,8 +216,6 @@ class FlowDB:
           expected_window_start REAL GENERATED ALWAYS AS (feature_cutoff_at-window_seconds) VIRTUAL,
           expected_window_end REAL GENERATED ALWAYS AS (feature_cutoff_at) VIRTUAL,
           PRIMARY KEY(launch_id,window_seconds));
-        CREATE TABLE IF NOT EXISTS flow_usage(minute INTEGER NOT NULL,metric TEXT NOT NULL,count INTEGER NOT NULL,
-          PRIMARY KEY(minute,metric));
         CREATE TABLE IF NOT EXISTS flow_samples(at REAL PRIMARY KEY,active INTEGER,subscriptions INTEGER,
           curve_subscriptions INTEGER,v4_subscriptions INTEGER,hook_subscriptions INTEGER,db_bytes INTEGER);
         CREATE TABLE IF NOT EXISTS flow_bootstrap(
@@ -252,6 +250,12 @@ class FlowDB:
         self.conn.commit()
         from app.flow_cutover import schema as cutover_schema
         cutover_schema(self)
+        from app.flow_partition_schema import create_shadow
+        with self.conn:
+            create_shadow(self.conn)
+            if not shared_budget:
+                self.conn.execute('''CREATE TABLE IF NOT EXISTS flow_usage(
+                  minute INTEGER NOT NULL,metric TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(minute,metric))''')
 
     def activate_pit_ledger(self,revision,block=None,now=None):
         """Start prospective collection once, after the new worker is connected."""
@@ -410,6 +414,11 @@ class FlowDB:
         """Quarantine is a partition boundary, never a target-expiry exemption."""
         epoch=self.collection_context()
         if not epoch:return 'healthy'  # Preserve legacy reporting semantics.
+        if epoch.get('research_segment_id'):
+            from app.flow_partition_schema import missing
+            if missing(self.conn):return 'SEGMENT_SCHEMA_INCOMPLETE'
+            local=self.conn.execute("SELECT value FROM flow_state WHERE key='recovery_state'").fetchone()
+            if local and local[0]=='LOCAL_DATABASE_ERROR':return 'LOCAL_DATABASE_ERROR'
         if self.state('research_segment_request_failure'):return 'research_segment_blocked'
         if epoch.get('research_segment_id') and self.conn.execute("SELECT 1 FROM flow_state WHERE key LIKE 'unbounded_current_gap:%' LIMIT 1").fetchone():return 'UNBOUNDED_CURRENT_GAP'
         from app.flow_epochs import sealed_proof_intact

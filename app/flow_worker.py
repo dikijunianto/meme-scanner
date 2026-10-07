@@ -577,6 +577,8 @@ class FlowWorker:
             self.db.count('flow_targets_created')
 
     async def reconcile(self):
+        from app.flow_partition_schema import require_segment
+        require_segment(self.db)
         from app.flow_segments import process_request
         await process_request(self)
         from app.flow_epochs import active_path
@@ -587,6 +589,7 @@ class FlowWorker:
             self.subscriptions={};self.routes={}
             old=self.db;self.db=FlowDB(self.settings.database)
             self.rpc.db=self.db;old.close()
+            require_segment(self.db)
             self.subscriptions={};self.routes={};self.pending_recovery.clear();self.recovery_heads.clear()
             self.blocked_recovery.clear();self.bootstrap_retry_at.clear();self.dirty.clear()
             self.headers=HeaderCache();self.subscription_ready_at=None
@@ -1004,7 +1007,26 @@ class FlowWorker:
             self.db.set_state('service_status','provider_switch_failed')
             self.db.set_state('recovery_state','provider_switch_failed')
 
+    async def local_database_block(self,exc):
+        # Local proof failure is terminal until operator maintenance, never a transport retry.
+        from app.flow_partition_schema import SegmentSchemaIncomplete
+        state='SEGMENT_SCHEMA_INCOMPLETE' if isinstance(exc,SegmentSchemaIncomplete) else 'LOCAL_DATABASE_ERROR'
+        diagnostic=str(exc) if isinstance(exc,SegmentSchemaIncomplete) else type(exc).__name__
+        log.error('Flow locally blocked state=%s diagnostic=%s',state,diagnostic)
+        try:
+            self.db.set_state('service_status',state)
+            self.db.set_state('recovery_state',state)
+            self.db.set_state('local_database_diagnostic',diagnostic)
+        except sqlite3.Error:pass
+        await asyncio.Event().wait()
+
     async def run(self):
+        from app.flow_partition_schema import require_segment,SegmentSchemaIncomplete
+        try:require_segment(self.db)
+        except (SegmentSchemaIncomplete,sqlite3.Error) as exc:
+            try:await self.local_database_block(exc)
+            finally:
+                await self.rpc.close();self.main.close()
         cutover=cutover_session(self.db)
         if (self.settings.split_enabled and cutover and
             cutover['state'] in ('CREATED','SHADOW_IN_PROGRESS','SHADOW_VERIFIED',
@@ -1033,6 +1055,8 @@ class FlowWorker:
                     self.db.set_state('budget_pause_reason','secondary_ws_bytes')
                     self.finalize(False);await asyncio.sleep(60);continue
                 try:
+                    local_block=False
+                    require_segment(self.db)
                     routed=provider(self.ws_url())
                     self.db.count('flow_wss_connections_'+routed)
                     async with connect(self.ws_url(),open_timeout=20,ping_interval=20,ping_timeout=20,
@@ -1057,6 +1081,7 @@ class FlowWorker:
                         if self.db.state('connected_once'):self.db.count('flow_provider_reconnects_'+routed)
                         self.db.set_state('connected_once',1)
                         while True:
+                            require_segment(self.db)
                             if self.pressure():raise FlowBudget('Phase 2B resource reserve reached')
                             if self.reader.done():await self.reader;raise RpcError('WS closed')
                             self.drain()
@@ -1083,6 +1108,9 @@ class FlowWorker:
                             if time.time()-started>60:failures=0
                             await asyncio.sleep(2)
                 except asyncio.CancelledError:raise
+                except (SegmentSchemaIncomplete,sqlite3.Error) as exc:
+                    local_block=True
+                    await self.local_database_block(exc)
                 except Exception as exc:
                     failures+=1
                     current=cutover_session(self.db) if self.settings.split_enabled else None
@@ -1130,7 +1158,7 @@ class FlowWorker:
                     if self.reader:
                         self.reader.cancel();await asyncio.gather(self.reader,return_exceptions=True)
                     # Buffered events are persisted before losing subscription routes.
-                    self.drain()
+                    if not local_block:self.drain()
                     self.subscriptions={};self.routes={}
                     self.subscription_ready_at=None
         finally:

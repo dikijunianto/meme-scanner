@@ -34,6 +34,8 @@ class SegmentTests(unittest.IsolatedAsyncioTestCase):
         with patch('app.flow_segments.time.time',return_value=1400):
             await flow_segments.prepare(runner,segment_id='clean1',revision='c'*40,reason='preclean incident')
         self.fresh=FlowDB(self.db.path);self.addCleanup(self.fresh.close)
+        from app.flow_partition_schema import missing
+        self.assertEqual(missing(self.fresh.conn),[])  # Before the lazy reconciler constructor.
         new,old=make_reconciler(self.config,self.settings,self.fresh,self.providers)
         await old.close();self.addAsyncCleanup(new.worker.rpc.close);self.addCleanup(new.worker.main.close)
         return new

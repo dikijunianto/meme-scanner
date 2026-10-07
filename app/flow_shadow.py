@@ -117,23 +117,8 @@ class ShadowReconciler:
         return f'cutover:{self.session_id}:{key}' if self.session_id else key
 
     def _schema(self):
-        self.db.conn.executescript('''
-          CREATE TABLE IF NOT EXISTS flow_shadow_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-          CREATE TABLE IF NOT EXISTS flow_shadow_jobs(
-            stage TEXT NOT NULL,launch_id INTEGER NOT NULL,kind TEXT NOT NULL,
-            original_safe_start INTEGER NOT NULL,reconciliation_upper_bound INTEGER NOT NULL,
-            next_unverified_block INTEGER NOT NULL,highest_contiguous_verified_block INTEGER NOT NULL,
-            span INTEGER NOT NULL DEFAULT 2000,actual_getlogs_calls INTEGER NOT NULL DEFAULT 0,
-            retries INTEGER NOT NULL DEFAULT 0,range_reductions INTEGER NOT NULL DEFAULT 0,
-            recovered_raw_events INTEGER NOT NULL DEFAULT 0,duplicates_ignored INTEGER NOT NULL DEFAULT 0,
-            failed_from INTEGER,failed_to INTEGER,failed_error TEXT,
-            completion_status TEXT NOT NULL DEFAULT 'pending',
-            PRIMARY KEY(stage,launch_id,kind));
-          CREATE TABLE IF NOT EXISTS flow_shadow_ranges(
-            stage TEXT NOT NULL,launch_id INTEGER NOT NULL,kind TEXT NOT NULL,
-            first_block INTEGER NOT NULL,last_block INTEGER NOT NULL,was_terminal INTEGER NOT NULL,
-            PRIMARY KEY(stage,launch_id,kind,first_block,last_block));
-        ''')
+        from app.flow_partition_schema import create_shadow
+        with self.db.conn:create_shadow(self.db.conn)
 
     def meta(self, key):
         row = self.db.conn.execute('SELECT value FROM flow_shadow_meta WHERE key=?',

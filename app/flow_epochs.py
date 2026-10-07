@@ -187,6 +187,8 @@ def seal_live(worker):
     from app.flow_bootstrap import CursorBootstrap
     from app import flow_provider_switch as switch
     db=worker.db;epoch=db.collection_context()
+    from app.flow_partition_schema import missing
+    if epoch and epoch.get('research_segment_id') and missing(db.conn):return False
     if not epoch or epoch['status']!='ACTIVATING' or epoch['pit_eligible']:return False
     if (not worker.epoch_discovery_ready or db.state('connection_state')!='connected' or db.state('service_status')!='connected' or
         worker.pending_recovery or not worker.subscriptions_acknowledged() or
