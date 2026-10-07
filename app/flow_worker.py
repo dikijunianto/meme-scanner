@@ -495,6 +495,11 @@ class FlowWorker:
             g=json.loads(t['graduation_json']) if t['graduation_json'] else None
             event=decode_event(item,t,g)
             block=int(item['blockNumber'],16)
+            if isinstance(shadow,str) and shadow.startswith('expired_gap:'):
+                prior=self.headers.blocks.get(block)
+                conflict=self.db.conn.execute('SELECT 1 FROM flow_events WHERE block_number=? AND block_hash!=? LIMIT 1',
+                                              (block,item['blockHash'])).fetchone()
+                if item.get('removed') or conflict or (prior and prior[0]!=item['blockHash']):return False
             self.latest_block=max(self.latest_block,block)
             if item.get('blockTimestamp'):
                 at=int(item['blockTimestamp'],16)
@@ -517,6 +522,10 @@ class FlowWorker:
                 self.db.gap(t['launch_id'],int(item.get('blockTimestamp','0x0'),16),time.time(),'reorg_unresolved')
             return True
         except (ValueError,KeyError,OverflowError,IndexError,DecodingError) as exc:
+            if isinstance(shadow,str) and shadow.startswith('expired_gap:'):
+                # A rejected forensic response fails its fixed proof job. It must
+                # not create fresh live debt or rewrite the expired lifecycle.
+                return False
             self.db.gap(t['launch_id'],t['tracking_start_at'],min(time.time(),t['tracking_end_at']),'unsupported_semantics')
             self.db.count('flow_rejected_events');self.dirty.add(t['launch_id'])
             log.warning('Flow event rejected launch=%s error=%s',t['launch_id'],type(exc).__name__)
@@ -582,7 +591,7 @@ class FlowWorker:
             for debt in current_debts:
                 if debt['state']=='operator_blocked':
                     save(self.db,debt,state='operator_blocked',reason=debt['reason_detail'])
-                else:self.pending_recovery.add(debt['launch_id'])
+                elif not debt.get('mode'):self.pending_recovery.add(debt['launch_id'])
             self.db.set_state('active_epoch_required_unresolved_gap_count',len(current_debts))
         if self.settings.split_enabled and (value:=cutover_session(self.db)) and value['state']=='FAILED':
             self.cutover_tick(targets)
@@ -730,6 +739,11 @@ class FlowWorker:
                 'temporary_budget_wait','daily_budget_exhausted','unrecoverable_gap','bootstrap_required','provider_error',
                 'provider_switch_failed','provider_switch_pending'):
             self.db.set_state('service_status','connected')
+        if current_debts:
+            from app.flow_expired_recovery import tick
+            live_pending=bool(self.pending_recovery & {t['launch_id'] for t in targets} or
+                              provider_switch.pending(self.db) or provider_switch.blocked(self.db))
+            await tick(self,current_debts,live_pending)
         status=self.db.state('service_status')
         self.db.set_state('recovery_state','healthy' if status=='connected' else status)
         active,historical=gap_counts(self.db)

@@ -285,6 +285,8 @@ class FlowDB:
         ready=(row['coverage_quality']=='complete' and
                all(p['bootstrap_status']=='complete' and p['cursor'] is not None for p in proof))
         if epoch:
+            if self.state(f'expired_forensic_target:{launch}'):
+                ready=False  # Forensic completeness is never retrospective PIT.
             from app.flow_provider_switch import pending,blocked
             seal=json.loads(epoch['boundary_json']).get('live_seal')
             ready=(ready and epoch['status']=='ACTIVE' and bool(epoch['pit_eligible']) and bool(seal) and not pending(self) and not blocked(self)

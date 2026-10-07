@@ -313,7 +313,7 @@ class ShadowReconciler:
                 except FlowBudget as exc:
                     self.pause_scope = exc.scope
                     self.pause_budget = exc
-                    if stage.startswith(('live_graduation:','live_bootstrap:','live_gap:','provider_switch:')):
+                    if stage.startswith(('live_graduation:','live_bootstrap:','live_gap:','expired_gap:','provider_switch:')):
                         return False
                     if 'minute' in str(exc):
                         if getattr(self.worker,'connected',False):self.worker.drain()

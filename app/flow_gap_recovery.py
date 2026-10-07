@@ -13,15 +13,24 @@ def obligations(db):
         gap=dict(row);target=db.target(gap['launch_id'])
         saved=json.loads(db.state(f'gap_recovery:{gap["id"]}','{}'))
         state=saved.get('state','queued');reason=saved.get('reason')
-        if not target or target['status'] in ('completed','partial') or target['tracking_end_at']+10<time.time():
-            state,reason='operator_blocked','target_expired_required_proof_retained'
+        mode=None
+        if not target:
+            state,reason='operator_blocked','missing_target'
+        elif target['status'] in ('completed','partial') or target['tracking_end_at']+10<time.time():
+            from app.flow_expired_recovery import bounds,MODE
+            mode=MODE
+            try:
+                bounds(db,gap)
+                if reason=='target_expired_required_proof_retained':state,reason='queued',None
+            except (ValueError,KeyError,TypeError) as exc:
+                state,reason='operator_blocked',str(exc)
         elif gap['reason'] not in ('ws_gap','reconnect_recovery_incomplete'):
             # Bootstrap/tail/switch debt has its own existing durable scheduler.
             if gap['reason'].startswith('bootstrap_required:') or gap['reason']=='epoch_activation_tail_required':
                 state,reason='queued',gap['reason']
             else:state,reason='operator_blocked','unsupported_gap_reason:'+gap['reason']
         elif gap['first_block'] is None:state,reason='operator_blocked','missing_required_block_boundary'
-        result.append({**gap,**saved,'state':state,'reason_detail':reason})
+        result.append({**saved,**gap,'state':state,'reason_detail':reason,'mode':mode})
     return result
 
 
