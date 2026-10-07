@@ -16,6 +16,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from flow_security_status import fingerprint,journal_counts,status
 from install_rpc_credential import install,InstallationError,failure_reason
 from app.config import Config
+from app.database import Database
 from app.flow_data import FlowDB
 from app.flow_worker import FlowSettings,FlowWorker,main as flow_main,cli as flow_cli
 from app.flow_providers import FlowProviders
@@ -75,7 +76,7 @@ class SecurityTests(unittest.IsolatedAsyncioTestCase):
         self.clean();self.assertIn('WebSocket',self.stream.getvalue())
 
     async def test_flow_websocket_failure_does_not_expose_url(self):
-        self.configure_flow();sqlite3.connect(self.config.database).close()
+        self.configure_flow();main=Database(self.config.database,self.config.chain_id);main.migrate();main.close()
         db=FlowDB(self.root/'flow.db');db.migrate();settings=FlowSettings(database=self.root/'flow.db')
         worker=FlowWorker(self.config,settings,db,FlowProviders(
             'https://mainnet.robinhood.validationcloud.io/v1/test',

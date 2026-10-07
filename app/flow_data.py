@@ -250,9 +250,10 @@ class FlowDB:
         self.conn.commit()
         from app.flow_cutover import schema as cutover_schema
         cutover_schema(self)
-        from app.flow_partition_schema import create_shadow
+        from app.flow_partition_schema import create_shadow,initialize_metadata
         with self.conn:
             create_shadow(self.conn)
+            initialize_metadata(self.conn)
             if not shared_budget:
                 self.conn.execute('''CREATE TABLE IF NOT EXISTS flow_usage(
                   minute INTEGER NOT NULL,metric TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(minute,metric))''')

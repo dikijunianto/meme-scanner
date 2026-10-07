@@ -144,7 +144,6 @@ after subscription ACKs and fresh bootstrap/tail proof. No old state is copied.
     try:
         fresh.migrate()
         fresh.activate_pit_ledger(revision,head,at)
-        fresh.set_state('schema_version',1)
         fresh.set_state('recovery_state','bootstrap_required')
         fresh.set_state('phase2b_coverage_start_at',at)
         fresh.set_state('epoch_catalog_path',catalog.path.resolve())

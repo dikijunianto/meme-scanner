@@ -1020,6 +1020,37 @@ class FlowWorker:
         except sqlite3.Error:pass
         await asyncio.Event().wait()
 
+    def local_startup_plan(self):
+        from app.flow_partition_schema import SegmentSchemaIncomplete
+        try:return self._local_startup_plan()
+        except SegmentSchemaIncomplete:raise
+        except (sqlite3.Error,KeyError,ValueError,TypeError,OverflowError,OSError) as exc:
+            raise SegmentSchemaIncomplete('SEGMENT_SCHEMA_INCOMPLETE: local startup '+type(exc).__name__) from None
+
+    def _local_startup_plan(self):
+        """Read-only startup path shared with the stopped production preflight."""
+        from app.flow_partition_schema import require_segment
+        require_segment(self.db,integrity=True)
+        cutover=cutover_session(self.db)
+        if (self.settings.split_enabled and cutover and cutover['state'] in
+            ('CREATED','SHADOW_IN_PROGRESS','SHADOW_VERIFIED','STOP_AUTHORIZED','SOURCE_STOPPED','STOP_TAIL_VERIFIED')):
+            raise ValueError('Split start requires verified split configuration')
+        targets=[dict(r) for r in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')")]
+        filters=[{'launch_id':t['launch_id'],'kinds':sorted(self.filters(t))} for t in targets]
+        int(self.db.state('last_connected_block',0))
+        for t in targets:
+            float(t['tracking_start_at']);float(t['tracking_end_at'])
+            if t['coverage_end_at'] is not None:float(t['coverage_end_at'])
+        # Parsing these local structures is safe; readiness/proof is never manufactured.
+        for row in self.db.conn.execute('SELECT payload FROM flow_provider_switches'):
+            json.loads(row[0])
+        for row in self.db.conn.execute('SELECT query_json FROM flow_bootstrap_identity'):
+            json.loads(row[0])
+        return {'gate':'LOCAL_STARTUP_PREFLIGHT_PASS','target_filters':filters,
+                'discovery_candidates':[r['id'] for r in eligible_launches(self.main,time.time())],
+                'resource_pressure':self.pressure(),'ws_bytes_today':self.secondary_ws_bytes(int(time.time())//86400*86400),
+                'wss_provider':provider(self.ws_url()),'network_operations':0,'state_writes':0}
+
     async def run(self):
         from app.flow_partition_schema import require_segment,SegmentSchemaIncomplete
         try:require_segment(self.db)
@@ -1027,6 +1058,7 @@ class FlowWorker:
             try:await self.local_database_block(exc)
             finally:
                 await self.rpc.close();self.main.close()
+        self.local_startup_plan()
         cutover=cutover_session(self.db)
         if (self.settings.split_enabled and cutover and
             cutover['state'] in ('CREATED','SHADOW_IN_PROGRESS','SHADOW_VERIFIED',
@@ -1165,6 +1197,26 @@ class FlowWorker:
             await self.rpc.close();self.main.close();self.db.set_state('service_status','stopped')
 
 
+def initialize_worker(config,settings,db,providers):
+    from app.flow_partition_schema import require_segment,SegmentSchemaIncomplete
+    if settings.database.resolve()==config.database.resolve():raise ValueError('Flow database must be separate from the main database')
+    if (epoch:=db.epoch()) and epoch['status'] not in ('ACTIVATING','ACTIVE'):
+        raise SegmentSchemaIncomplete('SEGMENT_SCHEMA_INCOMPLETE: closed epoch')
+    require_segment(db,integrity=True)
+    from app.flow_segments import record
+    if record(db) and not settings.split_enabled:raise SegmentSchemaIncomplete('SEGMENT_SCHEMA_INCOMPLETE: research requires split Validation routing')
+    if db.state('schema_version')!='1':raise SegmentSchemaIncomplete('SEGMENT_SCHEMA_INCOMPLETE: schema_version')
+    worker=FlowWorker(config,settings,db,providers)
+    return worker
+
+
+async def local_preflight(config,settings,db,providers):
+    # No migration, subscriptions, counters, recovery or feature materialization.
+    worker=initialize_worker(config,settings,db,providers)
+    try:return worker.local_startup_plan()
+    finally:await worker.rpc.close();worker.main.close()
+
+
 def main():
     logging.Formatter.converter=time.gmtime
     logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(message)s')
@@ -1177,16 +1229,11 @@ def main():
         log.info('Phase 2B disabled; no database or network activity');return
     config=Config.load()
     providers=FlowProviders.load()
-    if settings.database.resolve()==config.database.resolve():raise ValueError('Flow database must be separate from the main database')
     from app.flow_lock import flow_writer_lock
     with flow_writer_lock(settings.database):
         db=FlowDB(settings.database)
         try:
-            if (epoch:=db.epoch()) and epoch['status'] not in ('ACTIVATING','ACTIVE'):
-                raise ValueError('Historical epoch is closed; prepare a fresh proved epoch before starting')
-            # Migration is explicit, never a side effect of starting service.
-            if db.state('schema_version')!='1':raise ValueError('Run SQLite-safe flow initialization first')
-            asyncio.run(FlowWorker(config,settings,db,providers).run())
+            asyncio.run(initialize_worker(config,settings,db,providers).run())
         finally:
             db.close()
 

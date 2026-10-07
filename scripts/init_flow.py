@@ -28,7 +28,7 @@ def initialize(main,flow,backup_dir):
                 if checks[name]!='ok':raise ValueError('Backup integrity failure')
             destination.chmod(0o600)
     flow.parent.mkdir(parents=True,exist_ok=True)
-    db=FlowDB(flow);db.migrate();db.set_state('schema_version',1)
+    db=FlowDB(flow);db.migrate()
     checks['flow_after']=db.conn.execute('PRAGMA integrity_check').fetchone()[0]
     db.conn.close();flow.chmod(0o600)
     return {'backup_path':str(backup_dir),'integrity':checks,'main_database_modified':False}

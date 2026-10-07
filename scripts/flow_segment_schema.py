@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from app.flow_data import FlowDB
 from app.flow_lock import flow_writer_lock
-from app.flow_partition_schema import VERSION,missing,repair
+from app.flow_partition_schema import VERSION,missing,repair,validate_startup_contract
 from app.flow_segments import record
 from app.flow_shadow import verified_checkout
 from app.flow_worker import FlowSettings
@@ -29,7 +29,7 @@ def repair_existing(database,segment_id,epoch_id,start_block,start_at):
                 raise ValueError('Exact existing segment identity and boundary required')
             path=Path(before['db_path']).resolve()
             conn=sqlite3.connect(path.as_uri()+'?mode=rw',uri=True,timeout=5)
-            try:result=repair(conn)
+            try:result=repair(conn,segment=before,epoch=db.epoch(),catalog_path=database,catalog_conn=db.catalog_conn)
             finally:conn.close()
             if record(db)!=before:raise ValueError('Segment identity changed')
             return {**result,'segment_id':segment_id,'epoch_id':epoch_id,'start_block':start_block,
@@ -56,6 +56,7 @@ def main():
         try:
             db.conn.execute('BEGIN')
             result={'segment':record(db),'contract_version':VERSION,'missing':missing(db.conn),
+                    'startup_contract':validate_startup_contract(db.conn,segment=record(db),epoch=db.epoch(),catalog_path=database,catalog_conn=db.catalog_conn),
                     'repair_requirement':'FLOW_STOP_REQUIRED_FOR_SCHEMA_REPAIR'}
         finally:db.close()
     print(json.dumps(result,indent=2))

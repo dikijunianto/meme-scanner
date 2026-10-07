@@ -70,8 +70,8 @@ async def prepare(runner, *, segment_id, revision, reason):
     fresh=FlowDB(path,follow_epoch=False)
     try:
         fresh.migrate(shared_budget=True)
-        from app.flow_partition_schema import missing
-        if missing(fresh.conn):raise ValueError('SEGMENT_SCHEMA_INCOMPLETE before publication')
+        from app.flow_partition_schema import validate_startup_contract
+        if not validate_startup_contract(fresh.conn)['complete']:raise ValueError('SEGMENT_SCHEMA_INCOMPLETE before publication')
         fresh.activate_pit_ledger(revision,head,at)
         fresh.set_state('epoch_catalog_path',Path(db.catalog_conn.execute('PRAGMA database_list').fetchone()[2]).resolve())
         fresh.set_state('phase2b_coverage_start_at',at);fresh.set_state('recovery_state','bootstrap_required')
@@ -84,6 +84,12 @@ async def prepare(runner, *, segment_id, revision, reason):
                 boundary_json TEXT NOT NULL,preclean_debt_json TEXT NOT NULL,validated_at REAL,first_pit_json TEXT)''')
             db.catalog_conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_current_research_segment ON flow_research_segments((1)) WHERE status IN ('SEALED','ACTIVE','VALIDATED')")
             if current(db.catalog_conn):raise ValueError('Research segment concurrently created')
+            prospective={'segment_id':segment_id,'epoch_id':epoch['epoch_id'],'start_at':at,'start_block':head,
+                'source_revision':revision,'status':'SEALED','db_path':str(path.resolve()),
+                'boundary_json':json.dumps({'provider':'validation','chain_id':4663,'header':header}),
+                'preclean_debt_json':json.dumps(debt)}
+            check=validate_startup_contract(fresh.conn,segment=prospective,epoch=epoch,catalog_path=db.catalog_conn.execute('PRAGMA database_list').fetchone()[2],catalog_conn=db.catalog_conn)
+            if not check['complete']:raise ValueError('SEGMENT_SCHEMA_INCOMPLETE: '+','.join(check['failures']))
             db.catalog_conn.execute('INSERT INTO flow_research_segments VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 (segment_id,epoch['epoch_id'],at,head,revision,reason,None,'SEALED',str(path.resolve()),
                  json.dumps({'provider':'validation','chain_id':4663,'captured_at':captured,'header':header,
