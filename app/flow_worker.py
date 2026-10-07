@@ -146,6 +146,7 @@ class FlowWorker:
         self.rpc=FlowRpc(config,settings,db,providers)
         self.headers=HeaderCache();self.socket=None;self.reader=None;self.pending={};self.sequence=0
         self.subscriptions={};self.routes={};self.queue=asyncio.Queue(maxsize=2048)
+        self.retired_segment_subscriptions=set()
         self.connected=False;self.latest_block=0;self.last_tick=0;self.dirty=set()
         self.next_command=0
         self.ws_provider='publicnode' if settings.split_enabled else 'alchemy'
@@ -346,7 +347,7 @@ class FlowWorker:
         return filter_queries(t)
 
     def ensure_bootstrap_state(self,t):
-        if (self.db.epoch() or {}).get('status')=='ACTIVATING' and not self.db.conn.execute(
+        if (self.db.collection_context() or {}).get('status')=='ACTIVATING' and not (self.db.collection_context() or {}).get('research_segment_id') and not self.db.conn.execute(
             "SELECT 1 FROM flow_gaps WHERE launch_id=? AND reason='epoch_activation_tail_required'",(t['launch_id'],)).fetchone():
             self.db.gap(t['launch_id'],t['tracking_start_at'],time.time(),'epoch_activation_tail_required',t['launch_block'])
         graduation=json.loads(t['graduation_json']) if t['graduation_json'] else None
@@ -358,7 +359,7 @@ class FlowWorker:
     def bootstrap_kinds(self,t):
         kinds=list(self.filters(t))+(['curve'] if t['graduation_json'] else [])
         missing={kind for kind in kinds if self.db.needs_bootstrap(t['launch_id'],kind)}
-        if t['graduation_json'] and (self.db.epoch() or {}).get('status')=='ACTIVATING':
+        if t['graduation_json'] and (self.db.collection_context() or {}).get('status')=='ACTIVATING':
             job=self.db.conn.execute("SELECT completion_status FROM flow_shadow_jobs WHERE stage=? AND launch_id=? AND kind='curve'",
                 (f'live_graduation:{t["launch_id"]}',t['launch_id'])).fetchone()
             if not job or job[0]!='complete':missing.add('curve')
@@ -370,7 +371,7 @@ class FlowWorker:
         from app.flow_bootstrap import CursorBootstrap
         from app.flow_shadow import ShadowReconciler
         original_rpc=self.rpc
-        runner=ShadowReconciler(self,reserve=50 if self.db.epoch() else 0)
+        runner=ShadowReconciler(self,reserve=50 if self.db.collection_context() else 0)
         try:
             self.db.count('flow_filter_bootstrap_attempts')
             if t['graduation_json']:self.db.count('flow_graduated_bootstrap_attempts')
@@ -433,7 +434,8 @@ class FlowWorker:
                 # Finish old pinned progress, then prove the new connection's ACKed tail.
                 self.db.set_state(key,number+1)
                 return False
-            with self.db.conn:self.db.conn.execute("UPDATE flow_gaps SET resolved=1 WHERE launch_id=? AND reason='epoch_activation_tail_required'",(launch,))
+            if not (self.db.collection_context() or {}).get('research_segment_id'):
+                with self.db.conn:self.db.conn.execute("UPDATE flow_gaps SET resolved=1 WHERE launch_id=? AND reason='epoch_activation_tail_required'",(launch,))
             self.dirty.add(launch)
             return True
         finally:
@@ -461,9 +463,22 @@ class FlowWorker:
             cursors=[int(self.db.state(f'recovery:{t["launch_id"]}:{kind}'))-2
                      for kind in self.filters(t) if self.db.state(f'recovery:{t["launch_id"]}:{kind}') is not None]
             first=max(t['launch_block'],min(cursors)) if cursors else t['launch_block']
-        if not exists:self.db.gap(t['launch_id'],t['last_event_at'] or t['tracking_start_at'],time.time(),
-                                  'reconnect_recovery_incomplete',first)
+        if not exists:
+            context=self.db.collection_context() or {}
+            identity=self.db.state(f'normal_recovery_capture_current:{t["launch_id"]}')
+            saved=json.loads(self.db.state(identity,'null')) if identity and context.get('research_segment_id') else None
+            self.db.gap(t['launch_id'],t['last_event_at'] or t['tracking_start_at'],time.time(),
+                        'reconnect_recovery_incomplete',first,
+                        through_block=int(saved['header']['number'],16) if saved else None,
+                        provenance={'source':'recovery_head','identity':identity} if saved else None)
         self.pending_recovery.add(t['launch_id'])
+
+    def uncertainty(self,t,start,end,reason,first):
+        if (self.db.collection_context() or {}).get('research_segment_id'):
+            from app.flow_gap_contracts import defer
+            defer(self.db,dict(t),start,end,reason,first)
+            return None
+        return self.db.gap(t['launch_id'],start,end,reason,first)
 
     def defer_recovery(self,exc):
         if exc.reset_at:self.recovery_wait_until=max(self.recovery_wait_until,exc.reset_at)
@@ -557,11 +572,28 @@ class FlowWorker:
             # A fresh epoch always has explicit launch-to-head bootstrap debt;
             # a redundant timestamp-only gap must not outlive that real proof.
             # Pre-boundary launches are excluded from epoch PIT independently.
-            if not self.db.epoch() and start<float(self.db.state('phase2b_coverage_start_at')):
+            if not self.db.collection_context() and start<float(self.db.state('phase2b_coverage_start_at')):
                 self.db.gap(row['id'],start,float(self.db.state('phase2b_coverage_start_at')),'service_started_late')
             self.db.count('flow_targets_created')
 
     async def reconcile(self):
+        from app.flow_segments import process_request
+        await process_request(self)
+        from app.flow_epochs import active_path
+        selected=active_path(self.db.catalog_conn,self.settings.database)
+        if selected.resolve()!=self.db.path.resolve():
+            old_subscriptions=list(self.subscriptions.values())
+            self.retired_segment_subscriptions.update(old_subscriptions)
+            self.subscriptions={};self.routes={}
+            old=self.db;self.db=FlowDB(self.settings.database)
+            self.rpc.db=self.db;old.close()
+            self.subscriptions={};self.routes={};self.pending_recovery.clear();self.recovery_heads.clear()
+            self.blocked_recovery.clear();self.bootstrap_retry_at.clear();self.dirty.clear()
+            self.headers=HeaderCache();self.subscription_ready_at=None
+            self.connection_id=provider_switch.connection_open(self.db,self.ws_provider,self.connection_started_at,None)
+            self.db.set_state('current_wss_provider',self.ws_provider)
+            self.db.set_state('connection_state','connected');self.db.set_state('service_status','connected')
+            for sub in old_subscriptions:await self.command('eth_unsubscribe',[sub])
         now=time.time()
         # Expiry is independent of HTTP availability or discovery success.
         for t in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE tracking_end_at+10<? AND status NOT IN ('completed','partial')",(now,)).fetchall():
@@ -576,6 +608,8 @@ class FlowWorker:
                     await self.command('eth_unsubscribe',[sub]);del self.subscriptions[key]
             gaps=self.db.conn.execute('SELECT count(*) FROM flow_gaps WHERE launch_id=? AND resolved=0',(t['launch_id'],)).fetchone()[0]
             status='partial' if gaps or (t['coverage_end_at'] or 0)<t['tracking_end_at'] else 'completed'
+            if (self.db.collection_context() or {}).get('research_segment_id') and status=='partial' and not gaps:
+                self.db.gap(t['launch_id'],t['coverage_end_at'] or t['tracking_start_at'],t['tracking_end_at'],'target_expiry')
             with self.db.conn:self.db.conn.execute('UPDATE flow_tracking_targets SET status=?,completed_at=?,updated_at=? WHERE launch_id=?',(status,now,now,t['launch_id']))
             self.dirty.add(t['launch_id']);self.db.count('flow_targets_'+status)
         self.epoch_discovery_ready=False
@@ -585,7 +619,7 @@ class FlowWorker:
         except FlowBudget:self.db.count('flow_budget_pauses')
         targets=[dict(r) for r in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')")]
         current_debts=[]
-        if self.db.epoch():
+        if self.db.collection_context():
             from app.flow_gap_recovery import obligations,save
             current_debts=obligations(self.db)
             for debt in current_debts:
@@ -610,7 +644,7 @@ class FlowWorker:
             except FlowBudget:
                 self.db.gap(t['launch_id'],t['coverage_end_at'] or t['tracking_start_at'],now,'provider_budget')
                 self.db.count('flow_budget_pauses');continue
-            if new and (self.db.epoch() or {}).get('status')=='ACTIVATING':
+            if new and (self.db.collection_context() or {}).get('status')=='ACTIVATING':
                 activation_subscriptions_changed=True
             if new or t['launch_id'] in self.pending_recovery:
                 self.pending_recovery.add(t['launch_id'])
@@ -619,7 +653,8 @@ class FlowWorker:
                     self.blocked_recovery.pop(t['launch_id'],None)
                 recovery.append(t)
         if activation_subscriptions_changed:
-            with self.db.conn:self.db.conn.execute("UPDATE flow_gaps SET resolved=0 WHERE reason='epoch_activation_tail_required' AND launch_id IN (SELECT launch_id FROM flow_tracking_targets WHERE status NOT IN ('completed','partial'))")
+            if not (self.db.collection_context() or {}).get('research_segment_id'):
+                with self.db.conn:self.db.conn.execute("UPDATE flow_gaps SET resolved=0 WHERE reason='epoch_activation_tail_required' AND launch_id IN (SELECT launch_id FROM flow_tracking_targets WHERE status NOT IN ('completed','partial'))")
             self.subscription_ready_at=None
             queued={t['launch_id'] for t in recovery}
             for t in targets:
@@ -641,12 +676,19 @@ class FlowWorker:
                       or not self.accept_shadow_handoff(t)]
         if recovery and time.time()<self.recovery_wait_until:return
         if recovery:
-            activating=(self.db.epoch() or {}).get('status')=='ACTIVATING'
+            activating=(self.db.collection_context() or {}).get('status')=='ACTIVATING'
             normal=[] if activating else [t for t in recovery if not self.bootstrap_kinds(t)
                 and not any(d['launch_id']==t['launch_id'] for d in current_debts)]
             try:
-                if any(t['launch_id'] not in self.recovery_heads for t in normal):
-                    # Pin a head once; retries cannot chase a moving chain.
+                if (self.db.collection_context() or {}).get('research_segment_id'):
+                    from app.flow_gap_contracts import pin_recovery,capture_recovery
+                    missing=[t for t in normal if not self.db.state(f'normal_recovery_capture_current:{t["launch_id"]}')]
+                    if missing:
+                        last=int(await self.rpc.call('eth_blockNumber',[]),16)
+                        for t in missing:pin_recovery(self.db,t,last)
+                    for t in normal:
+                        self.recovery_heads[t['launch_id']]=await capture_recovery(self.db,self.rpc,t)
+                elif any(t['launch_id'] not in self.recovery_heads for t in normal):
                     last=int(await self.rpc.call('eth_blockNumber',[]),16)
                     self.latest_block=max(self.latest_block,last)
                     for t in normal:self.recovery_heads.setdefault(t['launch_id'],last)
@@ -660,6 +702,9 @@ class FlowWorker:
                 self.db.set_state('recovery_rejection_scope','provider_error')
                 return
             # One proof chunk per target/tick; rotate to avoid budget starvation.
+            if (self.db.collection_context() or {}).get('research_segment_id'):
+                from app.flow_gap_recovery import obligations
+                current_debts=obligations(self.db)
             recovery.sort(key=lambda t:(t['launch_id']<=self.bootstrap_last_launch,t['launch_id']))
             for t in recovery:
                 launch=t['launch_id']
@@ -697,6 +742,7 @@ class FlowWorker:
                         if debt['state']!='operator_blocked':await recover(self,t,debt)
                     if not self.db.conn.execute('SELECT 1 FROM flow_gaps WHERE launch_id=? AND resolved=0 LIMIT 1',(launch,)).fetchone():
                         self.pending_recovery.discard(launch);self.recovery_heads.pop(launch,None)
+                        with self.db.conn:self.db.conn.execute('DELETE FROM flow_state WHERE key=?',(f'normal_recovery_capture_current:{launch}',))
                     continue
                 fingerprint=self.recovery_fingerprint(t)
                 if self.blocked_recovery.get(launch)==fingerprint:continue
@@ -734,6 +780,7 @@ class FlowWorker:
                           AND first_block BETWEEN ? AND ? AND end_at<=?""",
                           (launch,first,last,time.time()))
                 self.pending_recovery.discard(launch);self.recovery_heads.pop(launch,None)
+                with self.db.conn:self.db.conn.execute('DELETE FROM flow_state WHERE key=?',(f'normal_recovery_capture_current:{launch}',))
                 self.blocked_recovery.pop(launch,None);self.dirty.add(launch)
         if not self.pending_recovery and self.db.state('service_status') in (
                 'temporary_budget_wait','daily_budget_exhausted','unrecoverable_gap','bootstrap_required','provider_error',
@@ -751,6 +798,8 @@ class FlowWorker:
         self.db.set_state('historical_unresolved_gap_count',historical)
         from app.flow_epochs import seal_live
         seal_live(self)
+        from app.flow_segments import validate_fresh
+        validate_fresh(self.db)
         self.db.set_state('recovery_state','healthy' if status=='connected' else status)
         if self.db.state('recovery_state')=='healthy' and not active and self.db.state('connection_state')=='connected':
             with self.db.conn:
@@ -763,6 +812,7 @@ class FlowWorker:
     def drain(self):
         while not self.queue.empty():
             params=self.queue.get_nowait();route=self.routes.get(params['subscription'])
+            if not route and params['subscription'] in self.retired_segment_subscriptions:continue
             if not route:raise RpcError('Notification without registered route')
             target=self.db.target(route[0])
             if target:self.ingest(target,params['result'])
@@ -852,12 +902,34 @@ class FlowWorker:
         stage=f'provider_switch:{row["id"]}'
         try:
             if item['frozen_head'] is None:
-                head=int(await self.rpc.call('eth_blockNumber',[]),16)
-                first=min(max(f['base'],int(f['cursor'])-2) if f['cursor'] is not None
-                          else f['base'] for f in item['filters'])
+                segment=(self.db.collection_context() or {}).get('research_segment_id')
+                capture_key=stage+':boundary_capture'
+                captured=json.loads(self.db.state(capture_key,'null')) if segment else None
+                if captured is None:
+                    head=int(await self.rpc.call('eth_blockNumber',[]),16)
+                    first=min(max(f['base'],int(f['cursor'])-2) if f['cursor'] is not None
+                              else f['base'] for f in item['filters'])
+                    if segment:self.db.set_state(capture_key,json.dumps({'head':head,'first':first,'filters':item['filters']},sort_keys=True))
+                else:
+                    if captured['filters']!=item['filters']:raise RpcError('Switch capture filter identity changed')
+                    head,first=captured['head'],captured['first']
                 if any(f['cursor'] is not None and int(f['cursor'])>head+2 for f in item['filters']):
                     raise RpcError('Provider switch cursor exceeds Validation head')
-                item=provider_switch.frozen(self.db,row['id'],head,first)
+                header=None
+                if (self.db.collection_context() or {}).get('research_segment_id'):
+                    header=await self.rpc.call('eth_getBlockByNumber',[hex(head),False])
+                    if int(header['number'],16)!=head:raise RpcError('Switch fixed header mismatch')
+                item=provider_switch.frozen(self.db,row['id'],head,first,header=header)
+                if header:
+                    for pending_row in self.db.conn.execute("SELECT key,value FROM flow_state WHERE key LIKE 'pending_uncertainty:%'").fetchall():
+                        uncertainty=json.loads(pending_row['value'])
+                        gap_id=self.db.gap(uncertainty['launch_id'],uncertainty['start_at'],int(header['timestamp'],16),'ws_gap',
+                            item['uncertain_from'],through_block=head,
+                            provenance={'source':'provider_switch','identity':str(row['id'])})
+                        if gap_id is not None:
+                            item['gap_ids'].append(gap_id)
+                            with self.db.conn:self.db.conn.execute('DELETE FROM flow_state WHERE key=?',(pending_row['key'],))
+                    provider_switch.save(self.db,row['id'],'PROVIDER_SWITCH_RECOVERY',item)
             runner.add_jobs(stage,item['uncertain_from'],item['frozen_head'],
                             {f['launch_id'] for f in item['filters']})
             if not await runner.run_stage(stage):
@@ -872,13 +944,27 @@ class FlowWorker:
             resolved=[]
             with self.db.conn:
                 for gap_id in item['gap_ids']:
-                    gap=self.db.conn.execute('SELECT launch_id,resolved FROM flow_gaps WHERE id=?',
+                    gap=self.db.conn.execute('SELECT * FROM flow_gaps WHERE id=?',
                                              (gap_id,)).fetchone()
                     if not gap:raise RpcError('Provider-switch gap disappeared')
                     jobs=self.db.conn.execute('SELECT completion_status FROM flow_shadow_jobs '
                         'WHERE stage=? AND launch_id=?',(stage,gap['launch_id'])).fetchall()
                     if not jobs or any(job[0]!='complete' for job in jobs):
                         raise RpcError('Provider-switch gap lacks full proof')
+                    if (self.db.collection_context() or {}).get('research_segment_id'):
+                        from app.flow_gap_contracts import read
+                        contract=read(self.db,gap)
+                        for filt in contract['filters']:
+                            job=self.db.conn.execute('SELECT * FROM flow_shadow_jobs WHERE stage=? AND launch_id=? AND kind=?',
+                                (stage,gap['launch_id'],filt['kind'])).fetchone()
+                            if not job or job['original_safe_start']>filt['first'] or job['reconciliation_upper_bound']<filt['last']:
+                                raise RpcError('Provider switch does not cover immutable gap bounds')
+                            covered=job['original_safe_start']-1
+                            for proof in self.db.conn.execute('SELECT first_block,last_block FROM flow_shadow_ranges WHERE stage=? AND launch_id=? AND kind=? ORDER BY first_block',
+                                (stage,gap['launch_id'],filt['kind'])):
+                                if proof[0]!=covered+1:raise RpcError('Provider-switch range hole')
+                                covered=proof[1]
+                            if covered!=job['reconciliation_upper_bound']:raise RpcError('Provider-switch range incomplete')
                     self.db.conn.execute('UPDATE flow_gaps SET resolved=1 WHERE id=?',(gap_id,))
                     resolved.append(gap_id)
                 for launch in {f['launch_id'] for f in item['filters']}:
@@ -932,7 +1018,7 @@ class FlowWorker:
         self.dirty.update(r[0] for r in self.db.conn.execute("SELECT launch_id FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')"))
         if self.db.state('connected_once') and not pending:
             for t in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')").fetchall():
-                self.db.gap(t['launch_id'],t['coverage_end_at'] or t['tracking_start_at'],min(time.time(),t['tracking_end_at']),
+                self.uncertainty(t,t['coverage_end_at'] or t['tracking_start_at'],min(time.time(),t['tracking_end_at']),
                             'ws_gap',int(self.db.state('last_connected_block',0)))
         failures=0
         try:
@@ -1017,10 +1103,10 @@ class FlowWorker:
                     gap_ids=[]
                     if not switching:
                         for t in self.db.conn.execute("SELECT * FROM flow_tracking_targets WHERE status NOT IN ('completed','partial')"):
-                            self.db.gap(t['launch_id'],t['coverage_end_at'] or t['tracking_start_at'],min(now,t['tracking_end_at']),
+                            gap_id=self.uncertainty(t,t['coverage_end_at'] or t['tracking_start_at'],min(now,t['tracking_end_at']),
                                         'provider_budget' if isinstance(exc,FlowBudget) else 'ws_gap',
                                         int(self.db.state('last_connected_block',0)))
-                            gap_ids.append(self.db.conn.execute('SELECT last_insert_rowid()').fetchone()[0])
+                            if gap_id is not None:gap_ids.append(gap_id)
                             self.dirty.add(t['launch_id'])
                         if (self.settings.split_enabled and current and current['state'] not in PENDING|{'FAILED'}
                             and not provider_switch.blocked(self.db,identity)):

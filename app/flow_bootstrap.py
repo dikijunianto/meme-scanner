@@ -29,6 +29,11 @@ class CursorBootstrap:
 
     def _expiry_cap(self, target, head, head_at):
         if target['tracking_end_at']>=head_at:return head,head_at
+        if (self.db.collection_context() or {}).get('research_segment_id'):
+            from app.flow_gap_contracts import failure
+            with self.db.conn:failure(self.db,target['launch_id'],target['tracking_start_at'],target['tracking_end_at'],
+                'bootstrap_required:expiry','Expired bootstrap lacks a previously frozen required head')
+            raise RpcError('Expired bootstrap lacks a previously frozen required head')
         row=self.worker.main.execute('''SELECT block_number,block_timestamp FROM launches
           WHERE block_timestamp>=? ORDER BY block_number LIMIT 1''',
           (iso(target['tracking_end_at']),)).fetchone()
@@ -46,7 +51,7 @@ class CursorBootstrap:
                 if end<base:continue
                 cursor=self.db.state(f'recovery:{target["launch_id"]}:{kind}')
                 start=self.runner.historical_start(target,kind,base,end)
-                if target['graduation_json'] and (self.db.epoch() or {}).get('status')=='ACTIVATING' and stage.startswith('live_graduation:'):
+                if target['graduation_json'] and (self.db.collection_context() or {}).get('status')=='ACTIVATING' and stage.startswith('live_graduation:'):
                     start=base  # Independent full lifecycle proof while research remains sealed.
                 if self.db.needs_bootstrap(target['launch_id'],kind):
                     self.db.require_bootstrap(target,kind,base)
@@ -73,6 +78,14 @@ class CursorBootstrap:
                     if cursor is None:
                         self.db.conn.execute("UPDATE flow_bootstrap SET status='in_progress' WHERE launch_id=? AND kind=? AND status='required'",
                                              (target['launch_id'],kind))
+                    if (self.db.collection_context() or {}).get('research_segment_id'):
+                        marker=f'gap_contract_job:{stage}:{target["launch_id"]}:{kind}'
+                        if self.db.state(marker) is None:
+                            reason='epoch_activation_tail_required' if stage.startswith('epoch_tail:') else f'bootstrap_required:{kind}'
+                            gap_id=self.db.gap(target['launch_id'],target['tracking_start_at'],cap_at,reason,start,
+                                through_block=end,provenance={'source':'shadow_job','identity':stage,'kind':kind})
+                            if gap_id is None:raise RpcError('UNBOUNDED_CURRENT_GAP')
+                            self.db.set_state(marker,gap_id)
 
     async def freeze(self, stage, ids, kinds=None):
         saved=self.runner.meta(stage+':head')
@@ -83,7 +96,7 @@ class CursorBootstrap:
             head_at=int(header['timestamp'],16)
             with self.db.conn:
                 for key,value in ((stage+':head',head),(stage+':head_at',head_at),
-                                  (stage+':ids',json.dumps(sorted(set(ids))))):
+                                  (stage+':ids',json.dumps(sorted(set(ids)))),(stage+':header',json.dumps(header,sort_keys=True))):
                     self.db.conn.execute('INSERT INTO flow_shadow_meta VALUES(?,?)',(key,str(value)))
         else:
             head=int(saved);head_at=int(self.runner.meta(stage+':head_at'))
@@ -136,10 +149,19 @@ class CursorBootstrap:
                 self.db.conn.execute('''INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key)
                   DO UPDATE SET value=max(cast(value AS INTEGER),cast(excluded.value AS INTEGER))''',
                                      (f'recovery:{launch}:{kind}',str(head)))
-                if state:
+                segment=(self.db.collection_context() or {}).get('research_segment_id')
+                if segment:
+                    from app.flow_gap_contracts import read
+                    for gap in self.db.conn.execute('SELECT * FROM flow_gaps WHERE launch_id=? AND resolved=0',(launch,)).fetchall():
+                        contract=read(self.db,gap)
+                        if (contract['upper_bound_provenance']['source']=='shadow_job' and
+                            contract['upper_bound_provenance']['identity']==stage and
+                            contract['upper_bound_provenance']['kind']==kind):
+                            self.db.conn.execute('UPDATE flow_gaps SET resolved=1 WHERE id=?',(gap['id'],))
+                elif state:
                     self.db.conn.execute('''UPDATE flow_gaps SET resolved=1 WHERE launch_id=? AND reason=?
                       AND first_block=?''',(launch,f'bootstrap_required:{kind}',state['safe_start']))
-                if (self.db.epoch() or {}).get('status')!='ACTIVE':
+                if not segment and (self.db.collection_context() or {}).get('status')!='ACTIVE':
                     self.db.conn.execute('''UPDATE flow_gaps SET resolved=1 WHERE launch_id=? AND resolved=0
                       AND reason IN ('ws_gap','reconnect_recovery_incomplete')
                       AND first_block BETWEEN ? AND ? AND end_at<=?''',

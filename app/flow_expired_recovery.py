@@ -80,6 +80,12 @@ def retain_verified_bounds(db, gap_id, upper, following):
 
 def bounds(db, gap):
     target=db.target(gap['launch_id']);epoch=db.epoch()
+    if db.state(f'gap_contract:{gap["id"]}'):
+        from app.flow_gap_contracts import read
+        contract=read(db,gap)
+        original=dict(db.conn.execute('SELECT * FROM flow_gaps WHERE id=?',(gap['id'],)).fetchone())
+        return {**contract,'gap':original,'target_status':target['status'],
+                'lifecycle':contract['lifecycle'],'upper_header':contract['upper_header']}
     if not epoch or epoch['status']!='ACTIVE' or not target or not expired(target):
         raise ValueError('Expired CURRENT ACTIVE epoch target required')
     encoded=db.state(f'expired_gap_bounds:{gap["id"]}')
@@ -179,7 +185,7 @@ def inventory(db):
 
 
 async def recover(worker, gap):
-    """One low-priority exact proof chunk; no cursor/subscription/target mutation."""
+    """Fixed proof chunk; expired targets get no cursor/subscription/lifecycle mutation."""
     from app.flow_gap_recovery import save
     from app.flow_bootstrap import CursorBootstrap
     db=worker.db
@@ -189,12 +195,13 @@ async def recover(worker, gap):
     saved=json.loads(db.state(f'gap_recovery:{gap["id"]}','{}'))
     if saved.get('retry_at',0)>time.time():return False
     stage=f'expired_gap:{gap["id"]}';target=db.target(gap['launch_id'])
+    forensic=expired(target)
     original=worker.rpc;runner=ShadowReconciler(worker,reserve=50)
     try:
         save(db,gap,state='recovering',mode=MODE,last_attempt_at=time.time())
         # Existing immutable versions remain untouched. New forensic diagnostics
         # for this expired lifecycle can never become retrospective first eligible.
-        db.set_state(f'expired_forensic_target:{gap["launch_id"]}',1)
+        if forensic:db.set_state(f'expired_forensic_target:{gap["launch_id"]}',1)
         for filt in bound['filters']:
             key=(stage,gap['launch_id'],filt['kind'])
             runner.set_meta(stage+f':semantics:{gap["launch_id"]}:{filt["kind"]}',bound['lifecycle'])
@@ -235,6 +242,20 @@ async def recover(worker, gap):
             ('status','tracking_start_at','tracking_end_at','completed_at','graduation_json','pool_id','current_phase')):
             raise ValueError('Expired lifecycle changed during proof')
         with db.conn:
+            if db.state(f'gap_contract:{gap["id"]}') and bound['upper_bound_provenance']['source']=='shadow_job':
+                # Attach independently verified reuse to the original immutable job;
+                # expiry does not erase a pending bootstrap/tail obligation.
+                origin=bound['upper_bound_provenance']['identity']
+                for filt in bound['filters']:
+                    key=(origin,gap['launch_id'],filt['kind'])
+                    existing=[dict(r) for r in db.conn.execute('SELECT first_block,last_block FROM flow_shadow_ranges WHERE stage=? AND launch_id=? AND kind=?',key)]
+                    _,holes=uncovered(filt['first'],filt['last'],existing)
+                    for first,last in holes:
+                        db.conn.execute('INSERT INTO flow_shadow_ranges VALUES(?,?,?,?,?,?)',(*key,first,last,int(last==filt['last'])))
+                    db.conn.execute("UPDATE flow_shadow_jobs SET completion_status='complete',next_unverified_block=?,highest_contiguous_verified_block=? WHERE stage=? AND launch_id=? AND kind=?",
+                        (filt['last']+1,filt['last'],*key))
+                    job=db.conn.execute('SELECT * FROM flow_shadow_jobs WHERE stage=? AND launch_id=? AND kind=?',key).fetchone()
+                    CursorBootstrap(runner)._verify_job(origin,job)
             if gap['reason'].startswith('bootstrap_required:'):
                 kind=gap['reason'].split(':',1)[1]
                 filt=next(f for f in bound['filters'] if f['kind']==kind)
@@ -243,6 +264,10 @@ async def recover(worker, gap):
                 db.conn.execute("UPDATE flow_bootstrap SET status='complete',completed_head=?,completed_at=? WHERE launch_id=? AND kind=?",
                                 (filt['last'],time.time(),gap['launch_id'],kind))
             db.conn.execute('UPDATE flow_gaps SET resolved=1 WHERE id=?',(gap['id'],))
+            if not forensic:
+                for job in jobs:
+                    db.conn.execute('INSERT INTO flow_state VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=max(cast(value AS INTEGER),cast(excluded.value AS INTEGER))',
+                        (f'recovery:{gap["launch_id"]}:{job["kind"]}',str(job['reconciliation_upper_bound'])))
             save(db,gap,state='resolved',mode=MODE,reason='exact_expired_interval_proved',completed_at=time.time())
         return True
     except (ValueError,RpcError) as exc:

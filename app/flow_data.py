@@ -171,6 +171,10 @@ class FlowDB:
         from app.flow_epochs import row
         return row(self.catalog_conn,self.path)
 
+    def collection_context(self):
+        from app.flow_segments import context
+        return context(self)
+
     def close(self):
         self.conn.close()
         if self.catalog_conn is not self.conn:self.catalog_conn.close()
@@ -259,7 +263,7 @@ class FlowDB:
                               (at,block,revision))
 
     def _append_feature_version(self,target,row,reason):
-        epoch=self.epoch()
+        epoch=self.collection_context()
         if epoch and (epoch['status'] not in ('ACTIVATING','ACTIVE') or target['tracking_start_at']<epoch['start_block_timestamp'] or
                       target['launch_block']<epoch['start_block']):
             return
@@ -284,6 +288,7 @@ class FlowDB:
                           'cursor':int(cursor) if cursor is not None else None})
         ready=(row['coverage_quality']=='complete' and
                all(p['bootstrap_status']=='complete' and p['cursor'] is not None for p in proof))
+        if epoch and epoch.get('research_segment_id'):ready=ready and self.current_health()=='healthy'
         if epoch:
             if self.state(f'expired_forensic_target:{launch}'):
                 ready=False  # Forensic completeness is never retrospective PIT.
@@ -338,6 +343,7 @@ class FlowDB:
                   'required_filter_set_hash':filter_hash,
                   'proof_source':'existing_bootstrap_and_recovery_cursors' if ready else 'incomplete_or_unknown'}
         if epoch:evidence['collection_epoch_id']=epoch['epoch_id']
+        if epoch and epoch.get('research_segment_id'):evidence['research_segment_id']=epoch['research_segment_id']
         if incidents:evidence['incident_reconstruction_not_pit_safe']=incidents
         self.conn.execute('''INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                           (launch,window,1+(prior['version_number'] if prior else 0),FEATURE_SCHEMA_VERSION,
@@ -369,8 +375,9 @@ class FlowDB:
         with self.conn:
             self.conn.execute('INSERT INTO flow_bootstrap VALUES(?,?,?,?,?,?,?)',
                               (launch,kind,safe_start,'required',None,time.time(),None))
-            self.conn.execute('INSERT INTO flow_gaps(launch_id,start_at,end_at,reason,first_block) VALUES(?,?,?,?,?)',
-                              (launch,at,at,f'bootstrap_required:{kind}',safe_start))
+            if not (self.collection_context() or {}).get('research_segment_id'):
+                self.conn.execute('INSERT INTO flow_gaps(launch_id,start_at,end_at,reason,first_block) VALUES(?,?,?,?,?)',
+                                  (launch,at,at,f'bootstrap_required:{kind}',safe_start))
             self.conn.execute("UPDATE flow_features SET coverage_quality='partial',coverage_reason=? WHERE launch_id=? AND feature_cutoff_at>=?",
                               (f'bootstrap_required:{kind}',launch,at))
             for feature in self.conn.execute('SELECT * FROM flow_features WHERE launch_id=? AND feature_cutoff_at>=?',(launch,at)):
@@ -401,8 +408,10 @@ class FlowDB:
 
     def current_health(self):
         """Quarantine is a partition boundary, never a target-expiry exemption."""
-        epoch=self.epoch()
+        epoch=self.collection_context()
         if not epoch:return 'healthy'  # Preserve legacy reporting semantics.
+        if self.state('research_segment_request_failure'):return 'research_segment_blocked'
+        if epoch.get('research_segment_id') and self.conn.execute("SELECT 1 FROM flow_state WHERE key LIKE 'unbounded_current_gap:%' LIMIT 1").fetchone():return 'UNBOUNDED_CURRENT_GAP'
         from app.flow_epochs import sealed_proof_intact
         if (epoch['status']!='ACTIVE' or not epoch['pit_eligible'] or
             not sealed_proof_intact(self,json.loads(epoch['boundary_json']).get('live_seal'))):return 'bootstrap_required'
@@ -410,9 +419,13 @@ class FlowDB:
         from app.flow_provider_switch import pending,blocked
         if blocked(self):return 'provider_switch_failed'
         if pending(self):return 'provider_switch_pending'
+        if epoch.get('research_segment_id'):
+            if self.conn.execute("SELECT 1 FROM flow_state WHERE key LIKE 'unbounded_current_gap:%' LIMIT 1").fetchone():return 'UNBOUNDED_CURRENT_GAP'
+            if self.conn.execute("SELECT 1 FROM flow_state WHERE key LIKE 'pending_uncertainty:%' LIMIT 1").fetchone():return 'recovering'
         if self.conn.execute('SELECT 1 FROM flow_gaps WHERE resolved=0 LIMIT 1').fetchone():
             from app.flow_gap_recovery import obligations
             debts=obligations(self)
+            if any('UNBOUNDED_CURRENT_GAP' in (d.get('reason_detail') or '') for d in debts):return 'UNBOUNDED_CURRENT_GAP'
             if any(d['state']=='operator_blocked' for d in debts):return 'unrecoverable_gap'
             if any(d['state']=='budget_wait' for d in debts):return 'temporary_budget_wait'
             return 'recovering'
@@ -440,9 +453,16 @@ class FlowDB:
     def used(self,metric,since):
         return self.budget_conn.execute('SELECT coalesce(sum(count),0) FROM flow_usage WHERE metric=? AND minute>=?',(metric,since)).fetchone()[0]
 
-    def gap(self,launch_id,start,end,reason,first_block=None):
+    def gap(self,launch_id,start,end,reason,first_block=None,*,through_block=None,provenance=None):
         with self.conn:
+            context=self.collection_context();contract=None
+            if context and context.get('research_segment_id'):
+                from app.flow_gap_contracts import build,failure
+                try:contract=build(self,launch_id,reason,first_block,through_block,provenance)
+                except (ValueError,TypeError,KeyError) as exc:
+                    failure(self,launch_id,start,end,reason,str(exc));return None
             gap=self.conn.execute('INSERT INTO flow_gaps(launch_id,start_at,end_at,reason,first_block) VALUES(?,?,?,?,?)',(launch_id,start,max(start,end),reason,first_block))
+            if contract:self.conn.execute('INSERT INTO flow_state VALUES(?,?)',(f'gap_contract:{gap.lastrowid}',json.dumps(contract,sort_keys=True)))
             if self.epoch():
                 self.conn.execute('INSERT INTO flow_state VALUES(?,?)',
                     (f'gap_recovery:{gap.lastrowid}',json.dumps({'state':'queued','attempts':0,'created_at':time.time()})))
@@ -452,6 +472,7 @@ class FlowDB:
             if target:
                 for feature in self.conn.execute('SELECT * FROM flow_features WHERE launch_id=? AND feature_cutoff_at>=?',(launch_id,start)):
                     self._append_feature_version(target,feature,reason)
+            return gap.lastrowid
 
     def target(self,launch_id):
         r=self.conn.execute('SELECT * FROM flow_tracking_targets WHERE launch_id=?',(launch_id,)).fetchone()

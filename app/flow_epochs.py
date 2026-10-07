@@ -37,13 +37,21 @@ def schema(conn):
 def row(conn, path):
     if not exists(conn):return None
     value=conn.execute('SELECT * FROM flow_collection_epochs WHERE db_path=?',(str(Path(path).resolve()),)).fetchone()
+    if value:return dict(value)
+    from app.flow_segments import current
+    segment=current(conn)
+    if segment and Path(segment['db_path']).resolve()==Path(path).resolve():
+        value=conn.execute('SELECT * FROM flow_collection_epochs WHERE epoch_id=?',(segment['epoch_id'],)).fetchone()
     return dict(value) if value else None
 
 
 def active_path(conn, default):
     if not exists(conn):return Path(default)
-    value=conn.execute("SELECT db_path FROM flow_collection_epochs WHERE status IN ('ACTIVATING','ACTIVE')").fetchone()
-    return Path(value[0]) if value else Path(default)
+    value=conn.execute("SELECT epoch_id,db_path FROM flow_collection_epochs WHERE status IN ('ACTIVATING','ACTIVE')").fetchone()
+    from app.flow_segments import current
+    segment=current(conn)
+    if segment and (not value or segment['epoch_id']!=value[0]):raise ValueError('Research segment parent is not current')
+    return Path(segment['db_path']) if segment else Path(value[1]) if value else Path(default)
 
 
 def allocate(db, kind):
@@ -178,7 +186,7 @@ def seal_live(worker):
     """Never treat an existing cursor or current COMPLETE flag as activation proof."""
     from app.flow_bootstrap import CursorBootstrap
     from app import flow_provider_switch as switch
-    db=worker.db;epoch=db.epoch()
+    db=worker.db;epoch=db.collection_context()
     if not epoch or epoch['status']!='ACTIVATING' or epoch['pit_eligible']:return False
     if (not worker.epoch_discovery_ready or db.state('connection_state')!='connected' or db.state('service_status')!='connected' or
         worker.pending_recovery or not worker.subscriptions_acknowledged() or
@@ -235,8 +243,12 @@ def seal_live(worker):
     with db.catalog_conn:
         boundary=json.loads(epoch['boundary_json'])
         boundary['live_seal']={'proved_at':time.time(),'filters':proof,'zero_active_gaps':True}
-        db.catalog_conn.execute("UPDATE flow_collection_epochs SET status='ACTIVE',pit_eligible=1,boundary_json=? WHERE epoch_id=? AND status='ACTIVATING'",
-                                (json.dumps(boundary,sort_keys=True),epoch['epoch_id']))
+        if epoch.get('research_segment_id'):
+            db.catalog_conn.execute("UPDATE flow_research_segments SET status='ACTIVE',boundary_json=? WHERE segment_id=? AND status='SEALED'",
+                                    (json.dumps(boundary,sort_keys=True),epoch['research_segment_id']))
+        else:
+            db.catalog_conn.execute("UPDATE flow_collection_epochs SET status='ACTIVE',pit_eligible=1,boundary_json=? WHERE epoch_id=? AND status='ACTIVATING'",
+                                    (json.dumps(boundary,sort_keys=True),epoch['epoch_id']))
     worker.dirty.update(r[0] for r in db.conn.execute('SELECT launch_id FROM flow_tracking_targets'))
     return True
 

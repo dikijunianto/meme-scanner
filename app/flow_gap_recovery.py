@@ -16,6 +16,14 @@ def obligations(db):
         mode=None
         if not target:
             state,reason='operator_blocked','missing_target'
+        elif db.state(f'gap_contract:{gap["id"]}'):
+            from app.flow_gap_contracts import read
+            from app.flow_expired_recovery import expired,MODE
+            mode=MODE if expired(target) else None
+            try:read(db,gap)
+            except (ValueError,KeyError,TypeError) as exc:state,reason='operator_blocked',str(exc)
+        elif (db.collection_context() or {}).get('research_segment_id'):
+            state,reason='operator_blocked','UNBOUNDED_CURRENT_GAP: immutable contract missing'
         elif target['status'] in ('completed','partial') or target['tracking_end_at']+10<time.time():
             from app.flow_expired_recovery import bounds,MODE
             mode=MODE
@@ -41,6 +49,10 @@ def save(db,gap,**values):
 
 
 async def recover(worker,target,gap):
+    if gap['state']=='operator_blocked':return False
+    if worker.db.state(f'gap_contract:{gap["id"]}'):
+        from app.flow_expired_recovery import recover as fixed_recover
+        return await fixed_recover(worker,gap)
     from app.flow_bootstrap import CursorBootstrap
     from app.flow_shadow import ShadowReconciler
     from app.flow_switch_recovery import semantics

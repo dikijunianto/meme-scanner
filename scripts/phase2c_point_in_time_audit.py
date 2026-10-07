@@ -295,13 +295,15 @@ def pair_audit(db, windows, as_of, legacy_end, split_start):
 
 def ledger_audit(db,as_of):
     """Only prospective, immutable first-eligible versions can enter model counts."""
-    epoch=None
+    epoch=None;segment=None
     if (any(r[1]=='collection' for r in db.execute('PRAGMA database_list')) and
         db.execute("SELECT 1 FROM collection.sqlite_master WHERE name='flow_collection_epochs'").fetchone()):
         epoch=db.execute("SELECT * FROM collection.flow_collection_epochs WHERE status IN ('ACTIVATING','ACTIVE')").fetchone()
         if not epoch:
             return {'collection_epoch':None,'primary_eligible':False,'first_eligible_versions':0,
                     'model_readiness':chronological_readiness([],True)}
+        if db.execute("SELECT 1 FROM collection.sqlite_master WHERE name='flow_research_segments'").fetchone():
+            segment=db.execute("SELECT * FROM collection.flow_research_segments WHERE epoch_id=? AND status IN ('SEALED','ACTIVE','VALIDATED')",(epoch['epoch_id'],)).fetchone()
     if not db.execute("SELECT 1 FROM flow.sqlite_master WHERE name='flow_feature_ledger_start'").fetchone():
         return {'boundary':None,'launches':0,'complete_windows':0,'first_eligible_versions':0,
                 'usable_by_pair':{},'days_of_history':0,'model_readiness':chronological_readiness([],True)}
@@ -317,6 +319,9 @@ def ledger_audit(db,as_of):
         key=(r['launch_id'],r['window_seconds'])
         if epoch and (epoch['status']!='ACTIVE' or not epoch['pit_eligible'] or r['launch_block']<epoch['start_block'] or
                       json.loads(r['proof_json']).get('collection_epoch_id')!=epoch['epoch_id']):continue
+        if segment and (segment['status']!='VALIDATED' or r['launch_block']<segment['start_block'] or
+                        r['tracking_start_at']<segment['start_at'] or r['feature_cutoff_at']<segment['start_at'] or
+                        json.loads(r['proof_json']).get('research_segment_id')!=segment['segment_id']):continue
         if key not in versions and r['coverage_quality']=='complete' and r['model_eligible_at'] is not None and r['model_eligible_at']<=as_of:
             graduation=json.loads(r['graduation_json']) if r['graduation_json'] else None
             if graduation and base.stamp(graduation['block_timestamp'])<=r['feature_cutoff_at']:
@@ -409,14 +414,25 @@ def ledger_audit(db,as_of):
         WHERE t.tracking_start_at>=? AND v.coverage_quality='complete' AND v.materialized_at<=?''',
         (start['start_at'],as_of)).fetchone()[0]
     readiness=chronological_readiness(model_rows,True)
+    if segment and (db.execute("SELECT 1 FROM flow.flow_state WHERE key LIKE 'unbounded_current_gap:%' OR key LIKE 'pending_uncertainty:%' OR key='research_segment_request_failure' LIMIT 1").fetchone() or
+                    db.execute("SELECT 1 FROM flow.flow_bootstrap WHERE status!='complete' LIMIT 1").fetchone() or
+                    db.execute("SELECT 1 FROM flow.flow_shadow_jobs WHERE completion_status!='complete' LIMIT 1").fetchone()):
+        readiness['unmet_conditions'].append('current_segment_unresolved_proof')
+        readiness['status']='MODEL_DATA_NOT_MATURE'
     if epoch and (db.execute('SELECT 1 FROM flow.flow_gaps WHERE resolved=0 LIMIT 1').fetchone() or
                   db.execute("SELECT 1 FROM flow.flow_provider_switches WHERE state!='HEALTHY' LIMIT 1").fetchone()):
         readiness['unmet_conditions'].append('current_epoch_unresolved_proof')
         readiness['status']='MODEL_DATA_NOT_MATURE'
-    if epoch and (as_of-epoch['start_block_timestamp'])/86400<60:
+    clean_start=segment['start_at'] if segment and segment['status']=='VALIDATED' else None if segment else epoch['start_block_timestamp'] if epoch else None
+    if segment and segment['status']!='VALIDATED':
+        readiness['unmet_conditions'].append('research_clean_start_unknown')
+        readiness['status']='MODEL_DATA_NOT_MATURE'
+    if clean_start is not None and (as_of-clean_start)/86400<60:
         readiness['unmet_conditions'].append('clean_epoch_elapsed_days_below_60')
         readiness['status']='MODEL_DATA_NOT_MATURE'
     return {'collection_epoch':dict(epoch) if epoch else None,
+            'research_segment':dict(segment) if segment else None,
+            'research_clean_start':clean_start if segment else None,
             'boundary':{'start_utc':utc(start['start_at']),'start_block':start['start_block'],
                         'deploy_revision':start['deploy_revision']},'launches':launches,
             'complete_windows':complete,'first_eligible_versions':len(versions),

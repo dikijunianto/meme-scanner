@@ -205,13 +205,21 @@ def acknowledged(db,switch_id,now=None):
     return item
 
 
-def frozen(db,switch_id,head,first,now=None):
+def frozen(db,switch_id,head,first,now=None,header=None):
     row=db.conn.execute('SELECT * FROM flow_provider_switches WHERE id=?',(switch_id,)).fetchone()
     if not row or row['id']!=switch_id or not value(row)['subscriptions_ready_at']:
         raise ValueError('Provider subscriptions are not acknowledged')
-    item=value(row);item.update(frozen_head=head,uncertain_from=first,uncertain_to=head,
+    item=value(row)
+    if item.get('frozen_head') is not None:
+        if item['frozen_head']!=head or item['uncertain_from']!=first or (header is not None and item.get('boundary_header')!=header):
+            raise ValueError('Frozen switch boundary is immutable')
+        return item
+    item.update(frozen_head=head,uncertain_from=first,uncertain_to=head,
                                 head_at=time.time() if now is None else now,
                                 stage=f'provider_switch:{switch_id}')
+    if header is not None:
+        if int(header['number'],16)!=head:raise ValueError('Frozen switch header mismatch')
+        item['boundary_header']=header
     save(db,switch_id,'PROVIDER_SWITCH_RECOVERY',item)
     return item
 

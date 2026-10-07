@@ -17,9 +17,13 @@ def status():
     settings=FlowSettings.load();db=FlowDB(settings.database,readonly=True)
     try:
         cutover=session(db)
+        from app.flow_segments import record,historical_debt as preclean_debt
+        segment=record(db)
         with open_readonly(Config.load().database,settings.database) as joined:
             maturity=ledger_audit(joined,time.time())
         return {'current_epoch':db.epoch(),'health':db.state('recovery_state'),
+                'research_segment':segment,'preclean_incident_debt':preclean_debt(db),
+                'research_clean_start':segment['start_at'] if segment and segment['status']=='VALIDATED' else None,
                 'active_and_historical_current_epoch_gaps':gap_counts(db),
                 'current_epoch_switches':report(db,session_id=cutover['id'] if cutover else None),
                 'current_epoch_pit':maturity,'historical_quarantined_debt':historical_debt(db),
