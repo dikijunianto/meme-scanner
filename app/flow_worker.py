@@ -156,6 +156,7 @@ class FlowWorker:
         self.bootstrap_last_launch=0
         self.epoch_discovery_ready=False
         self.connection_id=None;self.subscription_ready_at=None;self.switch_retry_at=0
+        self.activation_session=None;self.last_command_ack=None
 
     def cutover_tick(self, targets):
         """Keep planned startup recovery behind the durable HTTP handoff."""
@@ -340,7 +341,11 @@ class FlowWorker:
         try:
             await self.socket.send(json.dumps({'jsonrpc':'2.0','id':number,'method':method,'params':params}))
             message=await asyncio.wait_for(future,20)
-            return Rpc.result(message,number,method)
+            result=Rpc.result(message,number,method)
+            if method=='eth_subscribe' and (not isinstance(result,str) or not result):
+                raise RpcError('Invalid subscription ACK identity')
+            self.last_command_ack={'request_id':number,'acked_at':time.time(),'method':method}
+            return result
         finally:self.pending.pop(number,None)
 
     def filters(self,t):
@@ -492,12 +497,21 @@ class FlowWorker:
     async def subscribe(self,t):
         new=[]
         desired=self.filters(t)
+        if (self.db.collection_context() or {}).get('research_segment_id') and t['graduation_json']:
+            from app.flow_shadow import ShadowReconciler
+            runner=object.__new__(ShadowReconciler);runner.worker=self;runner.db=self.db
+            desired={kind:query for kind,query,_,_ in runner.periods(t,2**63-1)}
         for kind,query in desired.items():
             key=(t['launch_id'],kind)
             if key in self.subscriptions:continue
             if len(self.subscriptions)>=self.settings.max_subscriptions:
                 raise FlowBudget('Phase 2B subscription cap')
             sub=await self.command('eth_subscribe',['logs',query])
+            if (self.db.collection_context() or {}).get('research_segment_id'):
+                from app.flow_activation import ack
+                reply=self.last_command_ack
+                if not reply or reply['method']!='eth_subscribe':raise ValueError('Subscription protocol ACK missing')
+                ack(self,t,kind,query,sub,reply['request_id'],reply['acked_at'])
             self.subscriptions[key]=sub;self.routes[sub]=(t['launch_id'],kind);new.append(kind)
         for key,sub in list(self.subscriptions.items()):
             if key[0]==t['launch_id'] and key[1] not in desired:
@@ -594,6 +608,9 @@ class FlowWorker:
             self.blocked_recovery.clear();self.bootstrap_retry_at.clear();self.dirty.clear()
             self.headers=HeaderCache();self.subscription_ready_at=None
             self.connection_id=provider_switch.connection_open(self.db,self.ws_provider,self.connection_started_at,None)
+            if (self.db.collection_context() or {}).get('research_segment_id'):
+                from app.flow_activation import session
+                session(self)
             self.db.set_state('current_wss_provider',self.ws_provider)
             self.db.set_state('connection_state','connected');self.db.set_state('service_status','connected')
             for sub in old_subscriptions:await self.command('eth_unsubscribe',[sub])
@@ -666,6 +683,11 @@ class FlowWorker:
         if self.subscriptions_acknowledged() and self.subscription_ready_at is None:
             self.subscription_ready_at=time.time()
         if self.cutover_tick(targets):return
+        if (self.db.collection_context() or {}).get('research_segment_id'):
+            from app.flow_activation import drive
+            if not await drive(self,targets):
+                self.db.set_state('service_status','activation_proof_pending')
+                return
         if self.settings.split_enabled:
             session=cutover_session(self.db)
             identity=session['id'] if session else None
@@ -1046,10 +1068,13 @@ class FlowWorker:
             json.loads(row[0])
         for row in self.db.conn.execute('SELECT query_json FROM flow_bootstrap_identity'):
             json.loads(row[0])
+        from app.flow_activation import storage_preflight
+        activation_storage=storage_preflight(self.db)
         return {'gate':'LOCAL_STARTUP_PREFLIGHT_PASS','target_filters':filters,
                 'discovery_candidates':[r['id'] for r in eligible_launches(self.main,time.time())],
                 'resource_pressure':self.pressure(),'ws_bytes_today':self.secondary_ws_bytes(int(time.time())//86400*86400),
-                'wss_provider':provider(self.ws_url()),'network_operations':0,'state_writes':0}
+                'wss_provider':provider(self.ws_url()),'network_operations':0,'state_writes':0,
+                'activation_storage':activation_storage}
 
     async def run(self):
         from app.flow_partition_schema import require_segment,SegmentSchemaIncomplete
@@ -1106,6 +1131,9 @@ class FlowWorker:
                                 provider_switch.connected(self.db,switching['id'],routed,
                                                           self.connection_id,self.connection_started_at)
                         self.subscription_ready_at=None
+                        if (self.db.collection_context() or {}).get('research_segment_id'):
+                            from app.flow_activation import session
+                            session(self)
                         self.db.set_state('service_status','cutover_handoff_pending' if current and current['state'] in PENDING else 'connected')
                         self.db.set_state('connection_state','connected')
                         self.db.set_state('current_wss_provider',routed);started=time.time()
@@ -1140,7 +1168,7 @@ class FlowWorker:
                             if time.time()-started>60:failures=0
                             await asyncio.sleep(2)
                 except asyncio.CancelledError:raise
-                except (SegmentSchemaIncomplete,sqlite3.Error) as exc:
+                except (SegmentSchemaIncomplete,sqlite3.Error,ValueError,KeyError,TypeError) as exc:
                     local_block=True
                     await self.local_database_block(exc)
                 except Exception as exc:

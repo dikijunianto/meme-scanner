@@ -304,11 +304,16 @@ def ledger_audit(db,as_of):
                     'model_readiness':chronological_readiness([],True)}
         if db.execute("SELECT 1 FROM collection.sqlite_master WHERE name='flow_research_segments'").fetchone():
             segment=db.execute("SELECT * FROM collection.flow_research_segments WHERE epoch_id=? AND status IN ('SEALED','ACTIVE','VALIDATED')",(epoch['epoch_id'],)).fetchone()
+    segment_proven=False
+    if segment and segment['status']=='VALIDATED':
+        from app.flow_activation import joined_evidence
+        rid=json.loads(segment['first_pit_json'] or '{}').get('activation_evidence_id')
+        if rid:segment_proven=joined_evidence(db,epoch,segment,rid)['complete']
     if segment:
         from app.flow_partition_schema import missing,VERSION
         if absent:=missing(db,'flow'):
             readiness=chronological_readiness([],True)
-            clean_start=segment['start_at'] if segment['status']=='VALIDATED' else None
+            clean_start=segment['start_at'] if segment_proven else None
             readiness['unmet_conditions'].append('SEGMENT_SCHEMA_INCOMPLETE')
             if clean_start is None:readiness['unmet_conditions'].append('research_clean_start_unknown')
             readiness['status']='MODEL_DATA_NOT_MATURE'
@@ -331,9 +336,13 @@ def ledger_audit(db,as_of):
         key=(r['launch_id'],r['window_seconds'])
         if epoch and (epoch['status']!='ACTIVE' or not epoch['pit_eligible'] or r['launch_block']<epoch['start_block'] or
                       json.loads(r['proof_json']).get('collection_epoch_id')!=epoch['epoch_id']):continue
-        if segment and (segment['status']!='VALIDATED' or r['launch_block']<segment['start_block'] or
+        if segment and (not segment_proven or r['launch_block']<segment['start_block'] or
                         r['tracking_start_at']<segment['start_at'] or r['feature_cutoff_at']<segment['start_at'] or
                         json.loads(r['proof_json']).get('research_segment_id')!=segment['segment_id']):continue
+        if segment:
+            rid=json.loads(r['proof_json']).get('activation_evidence_id')
+            activation=joined_evidence(db,epoch,segment,rid) if rid else {'complete':False}
+            if not activation['complete'] or min(r['materialized_at'],r['feature_cutoff_at'])<activation['activated_at']:continue
         if key not in versions and r['coverage_quality']=='complete' and r['model_eligible_at'] is not None and r['model_eligible_at']<=as_of:
             graduation=json.loads(r['graduation_json']) if r['graduation_json'] else None
             if graduation and base.stamp(graduation['block_timestamp'])<=r['feature_cutoff_at']:
@@ -435,8 +444,8 @@ def ledger_audit(db,as_of):
                   db.execute("SELECT 1 FROM flow.flow_provider_switches WHERE state!='HEALTHY' LIMIT 1").fetchone()):
         readiness['unmet_conditions'].append('current_epoch_unresolved_proof')
         readiness['status']='MODEL_DATA_NOT_MATURE'
-    clean_start=segment['start_at'] if segment and segment['status']=='VALIDATED' else None if segment else epoch['start_block_timestamp'] if epoch else None
-    if segment and segment['status']!='VALIDATED':
+    clean_start=segment['start_at'] if segment and segment_proven else None if segment else epoch['start_block_timestamp'] if epoch else None
+    if segment and not segment_proven:
         readiness['unmet_conditions'].append('research_clean_start_unknown')
         readiness['status']='MODEL_DATA_NOT_MATURE'
     if clean_start is not None and (as_of-clean_start)/86400<60:

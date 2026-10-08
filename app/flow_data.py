@@ -293,12 +293,20 @@ class FlowDB:
                           'cursor':int(cursor) if cursor is not None else None})
         ready=(row['coverage_quality']=='complete' and
                all(p['bootstrap_status']=='complete' and p['cursor'] is not None for p in proof))
+        activation=None
+        if epoch and epoch.get('research_segment_id'):
+            from app.flow_activation import evidence as activation_evidence
+            activation=activation_evidence(self)
+            first=self.conn.execute('SELECT materialized_at FROM flow_feature_versions WHERE launch_id=? AND window_seconds=? ORDER BY version_number LIMIT 1',(launch,window)).fetchone()
+            ready=(ready and activation['complete'] and row['feature_cutoff_at']>=activation.get('activated_at',float('inf'))
+                   and (not first or first[0]>=activation['activated_at']))
         if epoch and epoch.get('research_segment_id'):ready=ready and self.current_health()=='healthy'
         if epoch:
             if self.state(f'expired_forensic_target:{launch}'):
                 ready=False  # Forensic completeness is never retrospective PIT.
             from app.flow_provider_switch import pending,blocked
             seal=json.loads(epoch['boundary_json']).get('live_seal')
+            if activation and activation['complete']:seal={'proved_at':activation['activated_at']}
             ready=(ready and epoch['status']=='ACTIVE' and bool(epoch['pit_eligible']) and bool(seal) and not pending(self) and not blocked(self)
                    and not self.conn.execute('SELECT 1 FROM flow_gaps WHERE resolved=0 LIMIT 1').fetchone())
             # Descriptive repair after a missed recovery cutoff is not fresh PIT.
@@ -342,6 +350,7 @@ class FlowDB:
         proved=at if ready else None
         if ready and epoch:
             proved=max(at,seal['proved_at'],*(p['completed_at'] for p in proof))
+            if activation:proved=max(proved,activation['activated_at'])
         evidence={'window_end_at':row['feature_cutoff_at'],'coverage_start_at':row['coverage_start_at'],
                   'coverage_end_at':row['coverage_end_at'],'filters':proof,
                   'lifecycle_state_at_cutoff':'graduated' if len(intervals)>1 else 'curve',
@@ -349,6 +358,7 @@ class FlowDB:
                   'proof_source':'existing_bootstrap_and_recovery_cursors' if ready else 'incomplete_or_unknown'}
         if epoch:evidence['collection_epoch_id']=epoch['epoch_id']
         if epoch and epoch.get('research_segment_id'):evidence['research_segment_id']=epoch['research_segment_id']
+        if activation and activation['complete']:evidence['activation_evidence_id']=activation['id']
         if incidents:evidence['incident_reconstruction_not_pit_safe']=incidents
         self.conn.execute('''INSERT INTO flow_feature_versions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                           (launch,window,1+(prior['version_number'] if prior else 0),FEATURE_SCHEMA_VERSION,
@@ -420,11 +430,14 @@ class FlowDB:
             if missing(self.conn):return 'SEGMENT_SCHEMA_INCOMPLETE'
             local=self.conn.execute("SELECT value FROM flow_state WHERE key='recovery_state'").fetchone()
             if local and local[0]=='LOCAL_DATABASE_ERROR':return 'LOCAL_DATABASE_ERROR'
+            if self.conn.execute("SELECT 1 FROM flow_state WHERE key LIKE 'unbounded_current_gap:%' LIMIT 1").fetchone():return 'UNBOUNDED_CURRENT_GAP'
+            from app.flow_activation import evidence
+            if not evidence(self)['complete']:return 'activation_proof_pending'
         if self.state('research_segment_request_failure'):return 'research_segment_blocked'
         if epoch.get('research_segment_id') and self.conn.execute("SELECT 1 FROM flow_state WHERE key LIKE 'unbounded_current_gap:%' LIMIT 1").fetchone():return 'UNBOUNDED_CURRENT_GAP'
         from app.flow_epochs import sealed_proof_intact
         if (epoch['status']!='ACTIVE' or not epoch['pit_eligible'] or
-            not sealed_proof_intact(self,json.loads(epoch['boundary_json']).get('live_seal'))):return 'bootstrap_required'
+            (not epoch.get('research_segment_id') and not sealed_proof_intact(self,json.loads(epoch['boundary_json']).get('live_seal')))):return 'bootstrap_required'
         if self.state('connection_state')!='connected':return 'disconnected'
         from app.flow_provider_switch import pending,blocked
         if blocked(self):return 'provider_switch_failed'

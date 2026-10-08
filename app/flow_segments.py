@@ -26,8 +26,10 @@ def record(db):
 def context(db):
     epoch=db.epoch();segment=record(db)
     if not segment:return epoch
-    return {**epoch,'status':'ACTIVATING' if segment['status']=='SEALED' else 'ACTIVE',
-            'pit_eligible':int(segment['status']!='SEALED'),'start_block':segment['start_block'],
+    from app.flow_activation import evidence
+    active=evidence(db)['complete']
+    return {**epoch,'status':'ACTIVE' if active else 'ACTIVATING',
+            'pit_eligible':int(active),'start_block':segment['start_block'],
             'start_block_timestamp':segment['start_at'],'source_revision':segment['source_revision'],
             'boundary_json':segment['boundary_json'],'research_segment_id':segment['segment_id']}
 
@@ -133,13 +135,17 @@ def validate_fresh(db,as_of=None):
     """Establish research start only from an actual immutable, post-seal PIT append."""
     from app.flow_epochs import sealed_proof_intact
     segment=record(db);now=time.time() if as_of is None else as_of
+    from app.flow_activation import evidence
+    activation=evidence(db)
+    if not activation['complete']:return False
     if not segment or segment['status']=='SEALED' or db.current_health()!='healthy':return False
-    seal=json.loads(segment['boundary_json']).get('live_seal')
-    if not sealed_proof_intact(db,seal):return False
+    seal={'proved_at':activation['activated_at']}
     for row in db.conn.execute('''SELECT v.*,t.launch_block,t.tracking_start_at FROM flow_feature_versions v
         JOIN flow_tracking_targets t USING(launch_id) WHERE version_number=1 AND feature_schema_version='v1'
         AND model_eligible_at IS NOT NULL ORDER BY model_eligible_at,launch_id,window_seconds'''):
         proof=json.loads(row['proof_json'])
+        if (proof.get('activation_evidence_id')!=activation['id'] or
+            row['feature_cutoff_at']<activation['activated_at'] or row['materialized_at']<activation['activated_at']):continue
         if (row['launch_block']<segment['start_block'] or row['tracking_start_at']<segment['start_at'] or
             row['feature_cutoff_at']<segment['start_at'] or row['materialized_at']<seal['proved_at'] or
             not row['materialized_at']<=row['model_eligible_at']<=now or
@@ -158,8 +164,8 @@ def validate_fresh(db,as_of=None):
         intact=True
         for filt in filters:
             state=db.conn.execute('SELECT * FROM flow_bootstrap WHERE launch_id=? AND kind=?',(row['launch_id'],filt['kind'])).fetchone()
-            jobs=db.conn.execute("SELECT * FROM flow_shadow_jobs WHERE launch_id=? AND kind=? AND original_safe_start=? AND stage LIKE 'live_%' ORDER BY reconciliation_upper_bound DESC",
-                (row['launch_id'],filt['kind'],state['safe_start'] if state else -1)).fetchall()
+            jobs=db.conn.execute("SELECT * FROM flow_shadow_jobs WHERE launch_id=? AND kind=? AND original_safe_start=? AND stage=?",
+                (row['launch_id'],filt['kind'],state['safe_start'] if state else -1,'research_tail:'+activation['id'])).fetchall()
             valid=False
             for job in jobs:
                 try:
@@ -170,8 +176,12 @@ def validate_fresh(db,as_of=None):
         if not intact:continue
         evidence={k:row[k] for k in ('launch_id','window_seconds','version_number','feature_cutoff_at',
                                    'materialized_at','model_eligible_at','payload_sha256')}
-        if segment['status']=='VALIDATED':return True
-        with db.catalog_conn:db.catalog_conn.execute("UPDATE flow_research_segments SET status='VALIDATED',validated_at=?,first_pit_json=? WHERE segment_id=? AND status='ACTIVE'",
+        if segment['status']=='VALIDATED' and json.loads(segment['first_pit_json'] or '{}').get('activation_evidence_id')==activation['id']:return True
+        evidence['activation_evidence_id']=activation['id']
+        if segment['first_pit_json']:
+            from app.flow_activation import append
+            with db.conn:append(db,'prior_validation:'+str(segment['validated_at']),{'validated_at':segment['validated_at'],'first_pit_json':segment['first_pit_json']})
+        with db.catalog_conn:db.catalog_conn.execute("UPDATE flow_research_segments SET status='VALIDATED',validated_at=?,first_pit_json=? WHERE segment_id=? AND status IN ('ACTIVE','VALIDATED')",
             (now,json.dumps(evidence,sort_keys=True),segment['segment_id']))
         return True
     return False

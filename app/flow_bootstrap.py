@@ -51,6 +51,8 @@ class CursorBootstrap:
                 if end<base:continue
                 cursor=self.db.state(f'recovery:{target["launch_id"]}:{kind}')
                 start=self.runner.historical_start(target,kind,base,end)
+                if stage.startswith('research_tail:'):
+                    start=max(base,self.db.collection_context()['start_block'])
                 if target['graduation_json'] and (self.db.collection_context() or {}).get('status')=='ACTIVATING' and stage.startswith('live_graduation:'):
                     start=base  # Independent full lifecycle proof while research remains sealed.
                 if self.db.needs_bootstrap(target['launch_id'],kind):

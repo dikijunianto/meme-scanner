@@ -26,7 +26,7 @@ def status():
         return {'current_epoch':db.epoch(),'health':db.current_health(),
                 'partition_schema':{'contract_version':VERSION,'missing':absent,'complete':not absent},
                 'research_segment':segment,'preclean_incident_debt':preclean_debt(db),
-                'research_clean_start':segment['start_at'] if segment and segment['status']=='VALIDATED' else None,
+                'research_clean_start':maturity.get('research_clean_start'),
                 'active_and_historical_current_epoch_gaps':gap_counts(db),
                 'current_epoch_switches':report(db,session_id=cutover['id'] if cutover else None),
                 'current_epoch_pit':maturity,'historical_quarantined_debt':historical_debt(db),

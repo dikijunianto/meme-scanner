@@ -49,9 +49,12 @@ class SegmentTests(unittest.IsolatedAsyncioTestCase):
             await CursorBootstrap(runner).run('live_bootstrap:200',[200])
         self.fresh.set_state('connection_state','connected');self.fresh.set_state('service_status','connected')
         worker.epoch_discovery_ready=True;worker.subscriptions={(200,'curve'):'ACK'};worker.subscription_ready_at=1420
+        from app import flow_activation
         with patch('app.flow_data.time.time',return_value=1425):
-            self.assertTrue(await worker.activation_tail(self.fresh.target(200)))
-            self.assertTrue(flow_epochs.seal_live(worker))
+            worker.ws_provider='validation';worker.connection_id=1
+            with patch('app.flow_activation.time.time',return_value=1420):flow_activation.session(worker,'c'*40)
+            flow_activation.ack(worker,t,'curve',worker.filters(t)['curve'],'ACK',1,1420)
+            self.assertTrue(await flow_activation.drive(worker,[self.fresh.target(200)],max_chunks=None))
         return worker,self.fresh.target(200)
 
     def captured_gap(self,t,reason='ws_gap',last=None):
@@ -82,7 +85,7 @@ class SegmentTests(unittest.IsolatedAsyncioTestCase):
         worker.queue.put_nowait({'subscription':'oldACK'})
         worker.command=AsyncMock(return_value=True);worker.discover=AsyncMock()
         worker.connection_started_at=1300
-        with patch('app.flow_data.time.time',return_value=1405):await worker.reconcile()
+        with patch('app.flow_data.time.time',return_value=1405),patch('app.flow_shadow.verified_checkout',return_value='c'*40):await worker.reconcile()
         worker.drain()
         self.assertEqual(worker.db.path,self.fresh.path)
         self.assertEqual(worker.db.epoch()['epoch_id'],'epoch2')

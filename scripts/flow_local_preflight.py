@@ -1,7 +1,7 @@
 """Stopped-writer, read-only real local startup path; no provider operations."""
 if __package__:from scripts import _bootstrap
 else:import _bootstrap
-import asyncio,json,socket
+import argparse,asyncio,json,socket
 from contextlib import ExitStack
 from unittest.mock import patch
 from app.config import Config
@@ -13,11 +13,15 @@ from scripts.phase2b2_shadow import service
 
 
 def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--read-only-live',action='store_true',help='Validate a live read snapshot and private-copy writers; no stopped-writer lock claim')
+    args=parser.parse_args()
     flow=service('meme-scanner-flow')
-    if flow['ActiveState']!='inactive' or int(flow['MainPID'])!=0:raise ValueError('FLOW_STOP_REQUIRED_FOR_LOCAL_PREFLIGHT')
+    if not args.read_only_live and (flow['ActiveState']!='inactive' or int(flow['MainPID'])!=0):raise ValueError('FLOW_STOP_REQUIRED_FOR_LOCAL_PREFLIGHT')
     settings=FlowSettings.load();config=Config.load();providers=FlowProviders.load()
     if not settings.enabled:raise ValueError('Flow disabled; not a startup proof')
-    with flow_writer_lock(settings.database):
+    from contextlib import nullcontext
+    with nullcontext() if args.read_only_live else flow_writer_lock(settings.database):
         db=FlowDB(settings.database,readonly=True)
         try:
             db.conn.execute('BEGIN');db.catalog_conn.execute('BEGIN')
@@ -30,7 +34,8 @@ def main():
                 result=asyncio.run(local_preflight(config,settings,db,providers))
             if attempts:raise RuntimeError('Local preflight attempted network')
             result['external_attempts']=len(attempts)
-            print(json.dumps({**result,'gate':'PRODUCTION_LOCAL_STARTUP_PREFLIGHT_PASS'},indent=2))
+            print(json.dumps({**result,'gate':'PRODUCTION_LOCAL_STARTUP_PREFLIGHT_PASS',
+                             'snapshot_only':args.read_only_live,'stopped_writer_lock_proven':not args.read_only_live},indent=2))
         finally:db.close()
 
 

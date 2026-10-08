@@ -151,7 +151,7 @@ class SegmentSchemaTests(unittest.IsolatedAsyncioTestCase):
         with self.fresh.catalog_conn:self.fresh.catalog_conn.execute("UPDATE flow_research_segments SET status='VALIDATED'")
         with open_readonly(self.config.database,self.db.path) as joined:
             blocked=ledger_audit(joined,1450)
-        self.assertEqual(blocked['research_clean_start'],flow_segments.record(self.fresh)['start_at'])
+        self.assertIsNone(blocked['research_clean_start'])
         self.assertFalse(blocked['primary_eligible'])
 
     async def test_complete_fixture_proof_switch_tail_and_pit(self):
@@ -159,7 +159,8 @@ class SegmentSchemaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(schema.missing(self.fresh.conn),[])
         self.assertTrue(self.fresh.conn.execute('SELECT * FROM flow_shadow_ranges').fetchone())
         self.assertEqual(self.fresh.current_health(),'healthy')
-        self.assertTrue(json.loads(self.fresh.state('epoch_tail_proof:200:curve'))['acknowledged'])
+        from app.flow_activation import evidence
+        self.assertTrue(evidence(self.fresh)['complete'])
         with patch('app.flow_data.time.time',return_value=1440):self.fresh.rebuild(t,1440)
         self.assertTrue(self.fresh.conn.execute('SELECT 1 FROM flow_feature_versions WHERE model_eligible_at IS NOT NULL').fetchone())
         sid,item=flow_provider_switch.start(self.fresh,'publicnode',worker.switch_filters(),[],now=1441)
@@ -198,6 +199,7 @@ class SegmentSchemaTests(unittest.IsolatedAsyncioTestCase):
         worker.reconcile=reconcile;worker.pressure=Mock(return_value=None)
         worker.secondary_ws_bytes=Mock(return_value=0)
         with patch('app.flow_worker.connect',return_value=connection) as connect,\
+             patch('app.flow_shadow.verified_checkout',return_value='c'*40),\
              patch('app.flow_worker.time.time',return_value=1445),patch('asyncio.Event.wait',cancel_wait):
             with self.assertRaises(asyncio.CancelledError):await worker.run()
         connect.assert_called_once()
